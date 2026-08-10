@@ -8,6 +8,7 @@ import constant from '../const/constant';
 import BizError from '../error/biz-error';
 import {t} from '../i18n/i18n'
 import verifyRecordService from './verify-record-service';
+import { toBoolean } from '../utils/oidc-utils';
 
 const settingService = {
 
@@ -188,6 +189,11 @@ const settingService = {
 	async websiteConfig(c) {
 
 		const settingRow = await this.get(c, true);
+		const authelia = {
+			enabled: toBoolean(c.env.authelia_sso_switch),
+			loginUrl: '/api/auth/login/authelia',
+			logoutEnabled: toBoolean(c.env.authelia_logout_enabled) && Boolean(c.env.authelia_logout_url),
+		};
 
 		return {
 			register: settingRow.register,
@@ -218,6 +224,9 @@ const settingService = {
 			linuxdoClientId: settingRow.linuxdoClientId,
 			linuxdoCallbackUrl: settingRow.linuxdoCallbackUrl,
 			linuxdoSwitch: settingRow.linuxdoSwitch,
+			autheliaSsoSwitch: authelia.enabled,
+			autheliaLoginUrl: authelia.loginUrl,
+			autheliaLogoutEnabled: authelia.logoutEnabled,
 			minEmailPrefix: settingRow.minEmailPrefix,
 			projectLink: settingRow.projectLink
 		};

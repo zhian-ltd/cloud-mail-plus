@@ -5,6 +5,7 @@
 	"scripts": {
 		"dev": "wrangler dev --config wrangler-dev.toml",
 		"test": "wrangler deploy --config wrangler-test.toml",
+		"test:unit": "vitest run --config vitest.unit.config.js",
 		"deploy": "wrangler deploy",
 		"start": "wrangler dev"
 	},
@@ -31,6 +32,7 @@
 		"hono": "^4.7.5",
 		"i18next": "^25.3.2",
 		"iso-639-3": "^3.0.1",
+		"jose": "^6.2.3",
 		"linkedom": "^0.18.10",
 		"postal-mime": "^2.4.3",
 		"resend": "^6.4.1",

@@ -154,6 +154,12 @@ A conversational email assistant powered by [Cloudflare Workers AI](https://deve
 
 **Integration stack**: [AI SDK v6](https://sdk.vercel.ai/) + `@ai-sdk/vue` v3 (`Chat` class) + `workers-ai-provider` + Cloudflare Workers AI. Full bilingual i18n.
 
+### 9. Authelia SSO (OIDC)
+
+The login page can optionally show a Single Sign-On button. The Worker uses OIDC Authorization Code Flow with `state`, `nonce`, and S256 PKCE, exchanges the code server-side, verifies the ID Token, persists the identity by `issuer + sub`, and then issues the native Cloud Mail Plus JWT. Password login and the existing permission model remain available.
+
+See the [Authelia SSO deployment guide](docs/authelia-sso.md) for configuration, migration, and verification.
+
 ---
 
 ## Deployment

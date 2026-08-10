@@ -19,6 +19,8 @@ set -euo pipefail
 #   bash scripts/deploy.sh                # interactive (prompts for AI agent too)
 #   bash scripts/deploy.sh --with-ai      # auto-enable AI Email Agent (non-interactive)
 #   bash scripts/deploy.sh --no-ai        # auto-disable AI Email Agent (non-interactive)
+#   bash scripts/deploy.sh --with-authelia # configure Authelia OIDC SSO
+#   bash scripts/deploy.sh --no-authelia   # explicitly disable Authelia SSO
 #   bash scripts/deploy.sh --bootstrap-domain    # also run CF API setup (Email Routing + DNS)
 #                                                # requires CF_API_TOKEN env var
 #   bash scripts/deploy.sh --redeploy     # skip resource creation, just rebuild + ship
@@ -46,6 +48,7 @@ DESTROY=false
 ASSUME_YES=false
 BOOTSTRAP_DOMAIN=false
 FORCE_AI=""   # "" = ask, "true" = enable, "false" = disable
+FORCE_AUTHELIA="" # "" = ask, "true" = enable, "false" = disable
 for arg in "$@"; do
   case "$arg" in
     --redeploy)         REDEPLOY=true ;;
@@ -53,6 +56,8 @@ for arg in "$@"; do
     --yes|-y)           ASSUME_YES=true ;;
     --with-ai)          FORCE_AI="true" ;;
     --no-ai)            FORCE_AI="false" ;;
+    --with-authelia)    FORCE_AUTHELIA="true" ;;
+    --no-authelia)      FORCE_AUTHELIA="false" ;;
     --bootstrap-domain) BOOTSTRAP_DOMAIN=true ;;
     --reset)            rm -f "$STATE_FILE"; echo "State file removed."; exit 0 ;;
     -h|--help)          sed -n '4,34p' "$0"; exit 0 ;;
@@ -106,20 +111,28 @@ preflight() {
 load_state() { [ -f "$STATE_FILE" ] && source "$STATE_FILE" || true; }
 save_state() {
   umask 077
-  cat >"$STATE_FILE" <<EOF
-# Cloud Mail Plus deploy state — do not commit (in .gitignore)
-DOMAINS="${DOMAINS:-}"
-ADMIN="${ADMIN:-}"
-USE_CF_EMAIL="${USE_CF_EMAIL:-}"
-USE_AI="${USE_AI:-}"
-JWT_SECRET="${JWT_SECRET:-}"
-D1_NAME="${D1_NAME:-}"
-D1_ID="${D1_ID:-}"
-KV_NAME="${KV_NAME:-}"
-KV_ID="${KV_ID:-}"
-R2_BUCKET="${R2_BUCKET:-}"
-WORKER_URL="${WORKER_URL:-}"
-EOF
+  {
+  echo '# Cloud Mail Plus deploy state — do not commit (in .gitignore)'
+  printf 'DOMAINS=%q\n' "${DOMAINS:-}"
+  printf 'ADMIN=%q\n' "${ADMIN:-}"
+  printf 'USE_CF_EMAIL=%q\n' "${USE_CF_EMAIL:-}"
+  printf 'USE_AI=%q\n' "${USE_AI:-}"
+  printf 'USE_AUTHELIA=%q\n' "${USE_AUTHELIA:-}"
+  printf 'AUTHELIA_ISSUER=%q\n' "${AUTHELIA_ISSUER:-}"
+  printf 'AUTHELIA_CLIENT_ID=%q\n' "${AUTHELIA_CLIENT_ID:-}"
+  printf 'AUTHELIA_REDIRECT_URI=%q\n' "${AUTHELIA_REDIRECT_URI:-}"
+  printf 'AUTHELIA_AUTO_CREATE_USER=%q\n' "${AUTHELIA_AUTO_CREATE_USER:-}"
+  printf 'AUTHELIA_REQUIRE_VERIFIED_EMAIL=%q\n' "${AUTHELIA_REQUIRE_VERIFIED_EMAIL:-}"
+  printf 'AUTHELIA_LOGOUT_ENABLED=%q\n' "${AUTHELIA_LOGOUT_ENABLED:-}"
+  printf 'AUTHELIA_LOGOUT_URL=%q\n' "${AUTHELIA_LOGOUT_URL:-}"
+  printf 'JWT_SECRET=%q\n' "${JWT_SECRET:-}"
+  printf 'D1_NAME=%q\n' "${D1_NAME:-}"
+  printf 'D1_ID=%q\n' "${D1_ID:-}"
+  printf 'KV_NAME=%q\n' "${KV_NAME:-}"
+  printf 'KV_ID=%q\n' "${KV_ID:-}"
+  printf 'R2_BUCKET=%q\n' "${R2_BUCKET:-}"
+  printf 'WORKER_URL=%q\n' "${WORKER_URL:-}"
+  } >"$STATE_FILE"
 }
 
 # --- Inputs ---
@@ -154,6 +167,59 @@ prompt_inputs() {
     fi
   fi
   ok "AI Email Agent: $USE_AI"
+
+  if [ -n "$FORCE_AUTHELIA" ]; then
+    USE_AUTHELIA="$FORCE_AUTHELIA"
+  elif [ -z "${USE_AUTHELIA:-}" ]; then
+    read -rp "  Enable Authelia SSO (OIDC Authorization Code + PKCE)? [y/N]: " ans
+    if [[ "${ans:-n}" =~ ^[Yy]$ ]]; then USE_AUTHELIA="true"; else USE_AUTHELIA="false"; fi
+  fi
+
+  if [ "$USE_AUTHELIA" = "true" ]; then
+    if [ -z "${AUTHELIA_ISSUER:-}" ]; then
+      read -rp "  Authelia issuer (e.g. https://auth.example.com): " AUTHELIA_ISSUER
+    fi
+    AUTHELIA_ISSUER="${AUTHELIA_ISSUER%/}"
+    [[ "$AUTHELIA_ISSUER" =~ ^https:// ]] || { err "Authelia issuer must be an HTTPS URL"; exit 1; }
+
+    if [ -z "${AUTHELIA_CLIENT_ID:-}" ]; then
+      read -rp "  Authelia OIDC client ID: " AUTHELIA_CLIENT_ID
+    fi
+    [ -z "$AUTHELIA_CLIENT_ID" ] && { err "Authelia client ID is required"; exit 1; }
+
+    if [ -z "${AUTHELIA_REDIRECT_URI:-}" ]; then
+      echo "  Redirect URI may be left empty to use the deployed Worker origin."
+      echo "  For a custom domain use: https://mail.example.com/api/auth/callback/authelia"
+      read -rp "  Authelia redirect URI [auto]: " AUTHELIA_REDIRECT_URI
+    fi
+    if [ -n "$AUTHELIA_REDIRECT_URI" ] && [[ ! "$AUTHELIA_REDIRECT_URI" =~ ^https:// ]]; then
+      err "Authelia redirect URI must be HTTPS"; exit 1
+    fi
+
+    AUTHELIA_AUTO_CREATE_USER="${AUTHELIA_AUTO_CREATE_USER:-false}"
+    AUTHELIA_REQUIRE_VERIFIED_EMAIL="${AUTHELIA_REQUIRE_VERIFIED_EMAIL:-true}"
+    AUTHELIA_LOGOUT_ENABLED="${AUTHELIA_LOGOUT_ENABLED:-false}"
+    if [ "$AUTHELIA_LOGOUT_ENABLED" = "true" ] && [ -z "${AUTHELIA_LOGOUT_URL:-}" ]; then
+      read -rp "  Full Authelia logout URL (including encoded return URL): " AUTHELIA_LOGOUT_URL
+    fi
+    if [ -n "${AUTHELIA_LOGOUT_URL:-}" ] && [[ ! "$AUTHELIA_LOGOUT_URL" =~ ^https:// ]]; then
+      err "Authelia logout URL must be HTTPS"; exit 1
+    fi
+
+    if [ -z "${AUTHELIA_CLIENT_SECRET:-}" ]; then
+      read -srp "  Authelia client secret (leave empty to keep/set later): " AUTHELIA_CLIENT_SECRET || true
+      echo
+    fi
+  else
+    AUTHELIA_ISSUER=""
+    AUTHELIA_CLIENT_ID=""
+    AUTHELIA_REDIRECT_URI=""
+    AUTHELIA_AUTO_CREATE_USER="false"
+    AUTHELIA_REQUIRE_VERIFIED_EMAIL="true"
+    AUTHELIA_LOGOUT_ENABLED="false"
+    AUTHELIA_LOGOUT_URL=""
+  fi
+  ok "Authelia SSO: $USE_AUTHELIA"
 
   D1_NAME="${D1_NAME:-cloud-mail}"
   KV_NAME="${KV_NAME:-cloud-mail-kv}"
@@ -233,9 +299,15 @@ ensure_r2() {
 # --- TOML patch (managed block — re-runs replace, never duplicate) ---
 patch_toml() {
   step "5/7" "Patching wrangler.toml with bindings + vars..."
-  python3 - "$WRANGLER_TOML" "$D1_NAME" "$D1_ID" "$KV_ID" "$R2_BUCKET" "$DOMAINS" "$ADMIN" "$JWT_SECRET" "$USE_CF_EMAIL" "$USE_AI" <<'PYEOF'
+  python3 - "$WRANGLER_TOML" "$D1_NAME" "$D1_ID" "$KV_ID" "$R2_BUCKET" "$DOMAINS" "$ADMIN" "$JWT_SECRET" "$USE_CF_EMAIL" "$USE_AI" "$USE_AUTHELIA" "$AUTHELIA_ISSUER" "$AUTHELIA_CLIENT_ID" "$AUTHELIA_REDIRECT_URI" "$AUTHELIA_AUTO_CREATE_USER" "$AUTHELIA_REQUIRE_VERIFIED_EMAIL" "$AUTHELIA_LOGOUT_ENABLED" "$AUTHELIA_LOGOUT_URL" <<'PYEOF'
 import re, sys, json
-toml_path, d1_name, d1_id, kv_id, r2_bucket, domains_csv, admin, jwt, use_cf, use_ai = sys.argv[1:11]
+(
+  toml_path, d1_name, d1_id, kv_id, r2_bucket, domains_csv, admin, jwt,
+  use_cf, use_ai, use_authelia, authelia_issuer, authelia_client_id,
+  authelia_redirect_uri, authelia_auto_create_user,
+  authelia_require_verified_email, authelia_logout_enabled,
+  authelia_logout_url,
+) = sys.argv[1:19]
 text = open(toml_path).read()
 
 start = "# >>> cloud-mail-deploy >>>"
@@ -243,6 +315,7 @@ end   = "# <<< cloud-mail-deploy <<<"
 text = re.sub(re.escape(start) + r".*?" + re.escape(end) + r"\n?", "", text, flags=re.S)
 
 domains = [d.strip() for d in domains_csv.split(",") if d.strip()]
+toml_str = json.dumps
 
 block = [
   start,
@@ -282,11 +355,30 @@ if use_ai == "true":
 block += [
   '[vars]',
   f"domain = '{json.dumps(domains)}'",
-  f'admin = "{admin}"',
-  f'jwt_secret = "{jwt}"',
-  end,
-  '',
+  f'admin = {toml_str(admin)}',
+  f'jwt_secret = {toml_str(jwt)}',
 ]
+
+if use_authelia == "true":
+  block += [
+    'authelia_sso_switch = "true"',
+    f'authelia_issuer = {toml_str(authelia_issuer)}',
+    f'authelia_client_id = {toml_str(authelia_client_id)}',
+    'authelia_scopes = "openid profile email"',
+    f'authelia_auto_create_user = {toml_str(authelia_auto_create_user)}',
+    f'authelia_require_verified_email = {toml_str(authelia_require_verified_email)}',
+    'authelia_token_endpoint_auth_method = "client_secret_basic"',
+    'authelia_id_token_signing_alg = "RS256"',
+    f'authelia_logout_enabled = {toml_str(authelia_logout_enabled)}',
+  ]
+  if authelia_redirect_uri:
+    block.append(f'authelia_redirect_uri = {toml_str(authelia_redirect_uri)}')
+  if authelia_logout_url:
+    block.append(f'authelia_logout_url = {toml_str(authelia_logout_url)}')
+else:
+  block.append('authelia_sso_switch = "false"')
+
+block += [end, '']
 
 open(toml_path, "w").write(text.rstrip() + "\n\n" + "\n".join(block))
 print("patched")
@@ -314,6 +406,26 @@ deploy_worker() {
     read -rp "  Enter Worker URL (e.g. https://cloud-mail.<your>.workers.dev): " WORKER_URL
   fi
   ok "Deployed: $WORKER_URL"
+}
+
+set_authelia_secret() {
+  if [ "${USE_AUTHELIA:-false}" != "true" ]; then return; fi
+
+  if [ -n "${AUTHELIA_CLIENT_SECRET:-}" ]; then
+    step "6/7" "Uploading Authelia client secret..."
+    cd "$WORKER_DIR"
+    if printf '%s' "$AUTHELIA_CLIENT_SECRET" | npx wrangler secret put authelia_client_secret >/dev/null; then
+      ok "Authelia client secret uploaded as a Worker secret"
+      unset AUTHELIA_CLIENT_SECRET
+    else
+      err "Failed to upload Authelia client secret"
+      err "Run manually: cd mail-worker && npx wrangler secret put authelia_client_secret"
+      exit 1
+    fi
+  else
+    warn "Authelia SSO is enabled but no client secret was supplied."
+    warn "Set it before testing SSO: cd mail-worker && npx wrangler secret put authelia_client_secret"
+  fi
 }
 
 # --- DB init ---
@@ -348,6 +460,7 @@ print_summary() {
   Domains:        $DOMAINS
   CF Email Send:  $USE_CF_EMAIL
   AI Agent:       ${USE_AI:-false}
+  Authelia SSO:   ${USE_AUTHELIA:-false}
 
   Resources:
     D1:    $D1_NAME ($D1_ID)
@@ -355,6 +468,7 @@ print_summary() {
     R2:    $R2_BUCKET
 $([ "${USE_AI:-false}" = "true" ] && echo "    AI:    [ai] binding bound to Workers AI"
    [ "${USE_AI:-false}" = "true" ] && echo "    DO:    EmailAgent (one Durable Object instance per user)")
+$([ "${USE_AUTHELIA:-false}" = "true" ] && echo "    SSO:   ${AUTHELIA_ISSUER}")
 
   State saved to: $STATE_FILE  (gitignored — contains JWT secret)
 
@@ -364,6 +478,8 @@ $([ "${USE_AI:-false}" = "true" ] && echo "    AI:    [ai] binding bound to Work
        Add catch-all rule for each domain → cloud-mail Worker
 $([ "$USE_CF_EMAIL" = "true" ] && echo "    3. Cloudflare Dashboard → Email → Email Sending — onboard each domain")
 $([ "${USE_AI:-false}" = "true" ] && echo "    4. Settings → AI Email Agent → enable + (optionally) auto-draft replies")
+$([ "${USE_AUTHELIA:-false}" = "true" ] && echo "    SSO callback: ${AUTHELIA_REDIRECT_URI:-$WORKER_URL/api/auth/callback/authelia}")
+$([ "${USE_AUTHELIA:-false}" = "true" ] && echo "    Re-run /api/init/<jwt_secret> after upgrades to create sso_identity")
 
   Re-deploy after code changes:
     bash scripts/deploy.sh --redeploy
@@ -534,9 +650,12 @@ if [ "$REDEPLOY" = "false" ]; then
 else
   step "—" "Redeploy mode: skipping resource creation, reusing existing config"
   [ -z "${D1_ID:-}" ] && { err "No saved state — run without --redeploy first"; exit 1; }
+  patch_toml
+  save_state
 fi
 
 deploy_worker
+set_authelia_secret
 save_state
 init_db
 save_state

@@ -41,6 +41,9 @@ importers:
       iso-639-3:
         specifier: ^3.0.1
         version: 3.0.1
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
       linkedom:
         specifier: ^0.18.10
         version: 0.18.12

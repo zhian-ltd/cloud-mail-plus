@@ -34,6 +34,7 @@ http.interceptors.response.use((res) => {
                     repeatNum: -4,
                 })
                 localStorage.removeItem('token')
+                localStorage.removeItem('ssoProvider')
                 router.replace('/login')
                 reject(data)
             } else if (data.code === 403) {
@@ -117,5 +118,4 @@ http.interceptors.response.use((res) => {
     })
 
 export default http
-
 

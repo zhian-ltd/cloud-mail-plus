@@ -245,14 +245,24 @@ function changeAside() {
   uiStore.asideShow = !uiStore.asideShow
 }
 
-function clickLogout() {
+async function clickLogout() {
   logoutLoading.value = true
-  logout().then(() => {
+  const ssoProvider = localStorage.getItem('ssoProvider')
+  try {
+    await logout()
+  } catch (error) {
+    console.error('Server-side logout failed', error)
+  } finally {
     localStorage.removeItem("token")
-    router.replace('/login')
-  }).finally(() => {
+    localStorage.removeItem('ssoProvider')
     logoutLoading.value = false
-  })
+  }
+
+  if (ssoProvider === 'authelia' && settingStore.settings.autheliaLogoutEnabled) {
+    window.location.replace('/api/auth/logout/authelia')
+    return
+  }
+  await router.replace('/login')
 }
 
 function formatName(email) {

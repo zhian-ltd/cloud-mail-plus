@@ -31,8 +31,32 @@ const dbInit = {
 		await this.v3DB(c);
 		await this.v3_1DB(c);
 		await this.v3_2DB(c);
+		await this.v3_3DB(c);
 		await settingService.refresh(c);
 		return c.text('success');
+	},
+
+	async v3_3DB(c) {
+		try {
+			await c.env.db.batch([
+				c.env.db.prepare(`
+					CREATE TABLE IF NOT EXISTS sso_identity (
+						identity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+						issuer TEXT NOT NULL,
+						subject TEXT NOT NULL,
+						user_id INTEGER NOT NULL,
+						email TEXT NOT NULL DEFAULT '',
+						create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+						update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+					)
+				`),
+				c.env.db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sso_identity_issuer_subject ON sso_identity(issuer, subject)`),
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_sso_identity_user_id ON sso_identity(user_id)`),
+			]);
+		} catch (e) {
+			console.error(`SSO 身份绑定表初始化失败：${e.message}`);
+			throw e;
+		}
 	},
 
 	async v3_2DB(c) {
