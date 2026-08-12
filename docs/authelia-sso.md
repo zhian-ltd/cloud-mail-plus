@@ -173,7 +173,7 @@ bash scripts/deploy.sh --with-authelia
 1. 将非敏感 OIDC 配置写入它管理的 `wrangler.toml` 区块。
 2. 部署 Worker 和前端。
 3. 用 `wrangler secret put` 写入明文 Client Secret，不把它保存到状态文件。
-4. 调用原有 `/api/init/<jwt_secret>`，创建或升级 D1，包括 `sso_identity` 表。
+4. 调用数据库初始化接口，创建或升级 D1，包括 `sso_identity` 表。自动部署通过 `X-Init-Secret` 请求头传递密钥，避免把 JWT 密钥写进 URL 和访问日志。
 
 若第一次部署时还不知道最终 URL，可先执行：
 
@@ -191,27 +191,90 @@ bash scripts/deploy.sh --with-authelia --redeploy
 
 ### 手动部署或升级已有实例
 
-```bash
-cd mail-worker
-pnpm install
-npx wrangler secret put authelia_client_secret
-npx wrangler deploy
-```
+不要在已有生产实例上直接用仓库中的默认 `mail-worker/wrangler.toml` 运行 `npx wrangler deploy`。该文件是待填写的模板；缺少的绑定会被生产部署移除。已有实例请优先使用下一节的 GitHub Actions，并把现有绑定全部映射为 Repository variables；或先用 `scripts/deploy.sh --with-authelia --redeploy` 生成完整配置后再部署。
 
-随后必须重新运行数据库初始化端点；它是幂等的：
+随后必须重新运行数据库初始化端点；它是幂等的。推荐从请求头传递密钥：
 
 ```bash
-curl --fail "https://mail.example.com/api/init/你的jwt_secret"
+curl --fail --request POST \
+  --header "X-Init-Secret: 你的jwt_secret" \
+  "https://mail.example.com/api/init"
 ```
 
 确认表和唯一索引存在：
 
 ```bash
-npx wrangler d1 execute cloud-mail --remote --command \
+npx wrangler d1 execute "你的_D1_数据库名" --remote --command \
   "SELECT name, type FROM sqlite_master WHERE name LIKE '%sso_identity%';"
 ```
 
 预期至少看到 `sso_identity` 表、`idx_sso_identity_issuer_subject` 唯一索引和 `idx_sso_identity_user_id` 索引。
+
+### GitHub Actions 自动部署（推荐）
+
+仓库的 `.github/workflows/deploy-cloudflare.yml` 会在 `main` 分支中的 Worker、前端或部署工作流发生变化时自动执行：安装锁定依赖、运行 Worker 单元测试、构建前端、把代码和加密 Worker Secrets 一次发布，并调用幂等的数据库初始化/升级接口。生产 Secrets 仅注入最终部署和初始化步骤，不会暴露给依赖安装、测试或前端构建。也可以在 GitHub 的 **Actions → Deploy cloud-mail to Cloudflare Workers → Run workflow** 手动执行（只允许 `main`）。
+
+已有实例推荐复用原 Worker 和绑定，不需要删除数据。先在 Cloudflare 控制台记录以下值，再到 fork 仓库的 **Settings → Secrets and variables → Actions** 配置。不要把 Secret 写进 Repository variable。
+
+Repository secrets：
+
+| 名称 | 必需 | 说明 |
+|---|---:|---|
+| `CLOUDFLARE_API_TOKEN` | 是 | 使用 Cloudflare `Edit Cloudflare Workers` 模板创建的 API Token |
+| `JWT_SECRET` | 是 | Cloud Mail Plus JWT 密钥；可保留旧值，修改它只会使现有登录会话失效，不会删除邮件数据。若旧值曾以明文变量保存或已经暴露，应生成新值并轮换 |
+| `AUTHELIA_CLIENT_SECRET` | 启用 SSO 时 | Authelia OIDC 客户端的明文 Secret；不是 PBKDF2 哈希 |
+| `LINUXDO_CLIENT_SECRET` | 否 | 仍需保留 LinuxDo 登录时填写 |
+
+Repository variables：
+
+| 名称 | 推荐值/说明 |
+|---|---|
+| `NAME` | 现有 Worker 名称，例如 `cloud-mail`；必须与要升级的 Worker 完全一致 |
+| `DEPLOYMENT_MODE` | 升级现有实例填 `existing`；只有明确全新部署时才填 `fresh` |
+| `PRODUCTION_BINDINGS_CONFIRMED` | 完成现有绑定盘点后才设为 `true`；这是防止误覆盖生产 Worker 的安全开关 |
+| `CUSTOM_DOMAIN` | 仅主机名，例如 `mail.example.com`，不要带 `https://` 或路径 |
+| `DOMAIN` | JSON 字符串数组，例如 `["example.com"]` |
+| `ADMIN` | Cloud Mail Plus 管理员邮箱 |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Account ID |
+| `D1_DATABASE_NAME` | 现有 D1 名称；一般为 `cloud-mail` |
+| `D1_DATABASE_ID` | 现有 D1 UUID；保留数据时务必填写 |
+| `KV_NAMESPACE_ID` | 现有 KV namespace ID；保留登录会话配置时务必填写 |
+| `R2_BUCKET_NAME` | 现有附件桶名称；没有使用 R2 时留空 |
+| `CF_EMAIL_SEND_ENABLED` | 旧实例有 `EMAIL` Send Email binding 时设 `true`，否则 `false` |
+| `WORKERS_AI_ENABLED` | 旧实例有 `AI` binding（翻译或邮件 Agent）时设 `true`，否则 `false` |
+| `AI_EMAIL_AGENT_ENABLED` | 旧实例有 `EMAIL_AGENT` Durable Object binding 时设 `true`，否则 `false`；启用时 `WORKERS_AI_ENABLED` 也须为 `true` |
+| `EMAIL_EVENTS_QUEUE` | 可选；旧实例配置邮件发送事件 consumer 时填写 queue 名称 |
+| `EMAIL_EVENTS_DEAD_LETTER_QUEUE` | 可选；对应 dead-letter queue 名称 |
+| `AUTHELIA_SSO_SWITCH` | `true` |
+| `AUTHELIA_ISSUER` | `https://auth.longlivehome.eu.org` |
+| `AUTHELIA_DISCOVERY_URL` | 可留空；需要显式固定时填 `https://auth.longlivehome.eu.org/.well-known/openid-configuration` |
+| `AUTHELIA_CLIENT_ID` | 与 Authelia 配置完全一致的 Client ID |
+| `AUTHELIA_REDIRECT_URI` | `https://mail.example.com/api/auth/callback/authelia` |
+| `AUTHELIA_SCOPES` | `openid profile email` |
+| `AUTHELIA_AUTO_CREATE_USER` | 保留现有用户时建议 `false`；全新空库可按风险接受程度设为 `true` |
+| `AUTHELIA_REQUIRE_VERIFIED_EMAIL` | `true` |
+| `AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD` | `client_secret_basic` |
+| `AUTHELIA_ID_TOKEN_SIGNING_ALG` | `RS256` |
+| `AUTHELIA_LOGOUT_ENABLED` | 初次部署建议 `false` |
+| `AUTHELIA_LOGOUT_URL` | 仅启用联动退出时填写完整 HTTPS URL |
+| `PROJECT_LINK` | 可选的项目链接 |
+| `ORM_LOG` | 可选；需要 Drizzle SQL 日志时填 `true`，否则留空或填 `false` |
+| `MAIL_BRIDGE_URL` | 可选；使用 Stalwart sent-mail bridge 时填写服务 URL |
+| `LINUXDO_CLIENT_ID` | 可选；仍保留 LinuxDo SSO 时填写 |
+| `LINUXDO_CALLBACK_URL` | 可选；仍保留 LinuxDo SSO 时填写 |
+| `LINUXDO_SWITCH` | 可选；保留时设 `true`，否则设 `false` |
+
+可选的 `MAIL_BRIDGE_KEY` 必须作为 Repository secret 保存，不能作为变量。
+
+只有在 `DEPLOYMENT_MODE=fresh` 时，`D1_DATABASE_ID` 或 `KV_NAMESPACE_ID` 才允许留空；工作流会按名称查找，找不到时创建新资源。`existing` 模式要求显式 ID，避免误接到空库。R2 bucket、Email Sending、AI/DO、队列及 Email Routing 不会自动创建，必须先在 Cloudflare 配好。自动创建 D1/KV 时，Cloudflare API Token 还需要对应的编辑权限。
+
+配置完成后把功能分支合并到 `main`。第一次成功运行会对原 D1 执行增量初始化，新增 `sso_identity`，不会清空现有用户、邮箱或邮件。后续每次向 `main` 推送相关代码都会自动更新同一个 Worker。
+
+从旧 Authentik 版本迁移时，先保持 `AUTHELIA_AUTO_CREATE_USER=false`，并确保 Authelia 返回的已验证 email 与原 Cloud Mail Plus 本地用户 email 完全相同（匹配不区分大小写）。旧 Authentik 实现没有可迁移的 Authelia `(issuer, sub)` 绑定；第一次 Authelia 登录会用 email 找到原用户并建立新绑定。若先开启自动创建且 email 不一致，会创建第二个本地用户，看起来像原邮件“消失”。确认绑定正确并留出一个回滚窗口后，才考虑开启自动创建和删除旧 `authentik_*` 变量/secret。
+
+Fork 第一次使用 Actions 时，GitHub 可能要求在 **Actions** 页点击启用工作流。务必先设置全部 Secrets/Variables，再合并 PR；PR 本身不会部署，合并到 `main` 才会触发。部署不是数据库事务：若 Worker 已更新但 Secret 上传或初始化失败，可先在 Cloudflare **Workers & Pages → Worker → Deployments** 回滚上一版本，修复配置后再从 Actions 手动重跑。
+
+Cloudflare Secret 的旧值不可回读。不知道旧 `JWT_SECRET` 时可以生成新的随机十六进制值；不会删除数据，但所有旧登录会话会失效。旧 Cloudflare API Token 或 OIDC Client Secret 不知道明文时，也应新建或轮换，而不是尝试恢复。
 
 ## 6. 用户匹配和权限行为
 
@@ -267,7 +330,7 @@ pnpm run build
 5. 查询绑定：
 
 ```bash
-npx wrangler d1 execute cloud-mail --remote --command \
+npx wrangler d1 execute "你的_D1_数据库名" --remote --command \
   "SELECT issuer, subject, user_id, email, create_time FROM sso_identity;"
 ```
 
@@ -284,4 +347,5 @@ npx wrangler d1 execute cloud-mail --remote --command \
 - ID Token 验证失败：确认 Client 的 `id_token_signed_response_alg` 与 Worker 的 `authelia_id_token_signing_alg` 一致，且 Authelia JWKS 正常。
 - UserInfo 缺少 email：Client scopes 必须允许 `email`，用户目录中也必须有主邮箱。
 - 自动创建失败：检查 Cloud Mail Plus `domain`、邮箱前缀规则和默认角色可用域名。
-- 已有实例首次启用后报 D1 表不存在：重新调用 `/api/init/<jwt_secret>`。
+- 已有实例首次启用后报 D1 表不存在：用本节的 `POST /api/init` + `X-Init-Secret` 方式重新初始化。
+- 部署后登录页仍是旧界面：先用无痕窗口验证；必要时硬刷新并注销旧 PWA Service Worker/清理该站点缓存。

@@ -2,37 +2,67 @@ name: 🚀 Deploy cloud-mail to Cloudflare Workers
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
+      - ".github/workflows/deploy-cloudflare.yml"
       - "mail-worker/**"
       - "mail-vue/**"
+      - "scripts/render-wrangler-action.py"
   workflow_dispatch:
 
+concurrency:
+  group: cloud-mail-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
-  Deploy-cloud-mail:
-    name: 🏗️ Build and Deploy
+  deploy-cloud-mail:
+    name: 🏗️ Test, build and deploy
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
 
     env:
-      NAME: ${{ secrets.NAME || vars.NAME || 'cloud-mail' }}
-      CUSTOM_DOMAIN: ${{ secrets.CUSTOM_DOMAIN || vars.CUSTOM_DOMAIN }}
-      DOMAIN: ${{ secrets.DOMAIN || vars.DOMAIN }}
-      ADMIN: ${{ secrets.ADMIN || vars.ADMIN }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET || vars.JWT_SECRET }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || vars.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
-      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID || vars.D1_DATABASE_ID }}
-      KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID || vars.KV_NAMESPACE_ID }}
-      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME || vars.R2_BUCKET_NAME }}
-      PROJECT_LINK: ${{ secrets.PROJECT_LINK || vars.PROJECT_LINK }}
-      LINUXDO_CLIENT_ID: ${{ secrets.LINUXDO_CLIENT_ID || vars.LINUXDO_CLIENT_ID }}
-      LINUXDO_CLIENT_SECRET: ${{ secrets.LINUXDO_CLIENT_SECRET || vars.LINUXDO_CLIENT_SECRET }}
-      LINUXDO_CALLBACK_URL: ${{ secrets.LINUXDO_CALLBACK_URL || vars.LINUXDO_CALLBACK_URL }}
-      LINUXDO_SWITCH: ${{ secrets.LINUXDO_SWITCH || vars.LINUXDO_SWITCH }}
+      NAME: ${{ vars.NAME }}
+      DEPLOYMENT_MODE: ${{ vars.DEPLOYMENT_MODE || 'existing' }}
+      PRODUCTION_BINDINGS_CONFIRMED: ${{ vars.PRODUCTION_BINDINGS_CONFIRMED || 'false' }}
+      CUSTOM_DOMAIN: ${{ vars.CUSTOM_DOMAIN }}
+      DOMAIN: ${{ vars.DOMAIN }}
+      ADMIN: ${{ vars.ADMIN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
+      D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+      KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
+      R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+      CF_EMAIL_SEND_ENABLED: ${{ vars.CF_EMAIL_SEND_ENABLED || 'false' }}
+      WORKERS_AI_ENABLED: ${{ vars.WORKERS_AI_ENABLED || 'false' }}
+      AI_EMAIL_AGENT_ENABLED: ${{ vars.AI_EMAIL_AGENT_ENABLED || 'false' }}
+      EMAIL_EVENTS_QUEUE: ${{ vars.EMAIL_EVENTS_QUEUE }}
+      EMAIL_EVENTS_DEAD_LETTER_QUEUE: ${{ vars.EMAIL_EVENTS_DEAD_LETTER_QUEUE }}
+      PROJECT_LINK: ${{ vars.PROJECT_LINK }}
+      ORM_LOG: ${{ vars.ORM_LOG }}
+      MAIL_BRIDGE_URL: ${{ vars.MAIL_BRIDGE_URL }}
+      LINUXDO_CLIENT_ID: ${{ vars.LINUXDO_CLIENT_ID }}
+      LINUXDO_CALLBACK_URL: ${{ vars.LINUXDO_CALLBACK_URL }}
+      LINUXDO_SWITCH: ${{ vars.LINUXDO_SWITCH || 'false' }}
+      AUTHELIA_SSO_SWITCH: ${{ vars.AUTHELIA_SSO_SWITCH || 'false' }}
+      AUTHELIA_ISSUER: ${{ vars.AUTHELIA_ISSUER }}
+      AUTHELIA_DISCOVERY_URL: ${{ vars.AUTHELIA_DISCOVERY_URL }}
+      AUTHELIA_CLIENT_ID: ${{ vars.AUTHELIA_CLIENT_ID }}
+      AUTHELIA_REDIRECT_URI: ${{ vars.AUTHELIA_REDIRECT_URI }}
+      AUTHELIA_SCOPES: ${{ vars.AUTHELIA_SCOPES || 'openid profile email' }}
+      AUTHELIA_AUTO_CREATE_USER: ${{ vars.AUTHELIA_AUTO_CREATE_USER || 'false' }}
+      AUTHELIA_REQUIRE_VERIFIED_EMAIL: ${{ vars.AUTHELIA_REQUIRE_VERIFIED_EMAIL || 'true' }}
+      AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD: ${{ vars.AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD || 'client_secret_basic' }}
+      AUTHELIA_ID_TOKEN_SIGNING_ALG: ${{ vars.AUTHELIA_ID_TOKEN_SIGNING_ALG || 'RS256' }}
+      AUTHELIA_LOGOUT_ENABLED: ${{ vars.AUTHELIA_LOGOUT_ENABLED || 'false' }}
+      AUTHELIA_LOGOUT_URL: ${{ vars.AUTHELIA_LOGOUT_URL }}
 
     outputs:
       worker_url: ${{ steps.deploy.outputs.worker_url }}
-
 
     steps:
       - name: 🚚 检出代码仓库 / Checkout repository
@@ -41,12 +71,12 @@ jobs:
       - name: ⚙ 设置 pnpm / Set up pnpm
         uses: pnpm/action-setup@v4.1.0
         with:
-          version: latest
+          version: 11.1.1
 
       - name: ⚙ 设置 Node.js / Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "pnpm"
           cache-dependency-path: "./mail-worker/pnpm-lock.yaml"
 
@@ -54,204 +84,302 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: ./mail-worker
 
-      - name: 📡 禁用 Wrangler 遥测 / Disable wrangler telemetry
-        working-directory: ./mail-worker
-        run: pnpm wrangler telemetry disable
+      - name: 📦 安装前端依赖 / Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: ./mail-vue
 
-      - name: 🛠️ 设置环境 / Set up environment
+      - name: 🧪 运行后端测试 / Run Worker tests
+        run: pnpm run test:unit
         working-directory: ./mail-worker
+
+      - name: 🏗️ 构建前端 / Build frontend
+        run: pnpm run build
+        working-directory: ./mail-vue
+
+      - name: 📌 安装锁定版本的 Wrangler / Install pinned Wrangler CLI
+        run: pnpm add --global wrangler@4.115.0
+
+      - name: 📡 禁用 Wrangler 遥测 / Disable Wrangler telemetry
+        working-directory: ./mail-worker
+        run: wrangler telemetry disable
+
+      - name: 🛡️ 校验部署配置 / Validate deployment configuration
+        shell: bash
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          AUTHELIA_CLIENT_SECRET: ${{ secrets.AUTHELIA_CLIENT_SECRET }}
+          MAIL_BRIDGE_KEY: ${{ secrets.MAIL_BRIDGE_KEY }}
+          LINUXDO_CLIENT_SECRET: ${{ secrets.LINUXDO_CLIENT_SECRET }}
         run: |
-          
-          echo "🔐 Starting environment setup..."
-          
-          if [ -z "$JWT_SECRET" ] || grep -q '[?%#/\\]' <<< "$JWT_SECRET"; then
-            echo "❌ JWT_SECRET variable is empty or contains invalid characters (?, %, #, /, \\)."
+          set -euo pipefail
+
+          validate_boolean() {
+            case "$2" in
+              true|false) ;;
+              *) echo "❌ $1 must be either true or false."; exit 1 ;;
+            esac
+          }
+
+          if [[ -z "$NAME" || ! "$NAME" =~ ^[a-z0-9-]+$ ]]; then
+            echo "❌ NAME must contain only lowercase letters, digits, and hyphens."
             exit 1
-          fi
-          
-          if ! jq -e 'type == "array"' <<< "$DOMAIN" ; then
-            echo "❌ DOMAIN variable must be a JSON array (e.g., [\"example.com\"])."
-            exit 1
-          fi
-          
-          if [ -z "$ADMIN" ]; then
-            echo "❌ ADMIN variable cannot be empty."
-            exit 1
-          fi
-          
-          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "❌ CLOUDFLARE_ACCOUNT_ID variable cannot be empty."
-            exit 1
-          fi
-          
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "❌ CLOUDFLARE_API_TOKEN variable cannot be empty."
-            exit 1
-          fi
-          
-          if [ -z "$CUSTOM_DOMAIN" ]; then
-            echo "::warning:: CUSTOM_DOMAIN variable is not set."
-          fi
-          
-          CONFIG_FILE="wrangler-action.toml"
-          
-          if [ -z "$R2_BUCKET_NAME" ]; then
-            sed -i '/\[\[r2_buckets\]\]/,/^$/d' "$CONFIG_FILE"
-          fi
-          
-          if [ -z "$PROJECT_LINK" ]; then
-            sed -i '/^project_link = /d' "$CONFIG_FILE"
-          fi
-          
-          if [ -z "$LINUXDO_CLIENT_ID" ] || [ -z "$LINUXDO_CLIENT_SECRET" ]; then
-            sed -i '/^linuxdo_client_id = /,/^linuxdo_switch = /d' "$CONFIG_FILE"
-          fi
-          
-          if [ -z "$CUSTOM_DOMAIN" ]; then
-            sed -i '/\[\[routes\]\]/,/^$/d' "$CONFIG_FILE"
           fi
 
-          sed -i "s|\${NAME}|${NAME}|g" "$CONFIG_FILE"
-          sed -i "s|\${CUSTOM_DOMAIN}|${CUSTOM_DOMAIN}|g" "$CONFIG_FILE"
-          sed -i "s|\"\${DOMAIN}\"|${DOMAIN}|g" "$CONFIG_FILE"
-          sed -i "s|\${ADMIN}|${ADMIN}|g" "$CONFIG_FILE"
-          sed -i "s|\${JWT_SECRET}|${JWT_SECRET}|g" "$CONFIG_FILE"
-          sed -i "s|\${R2_BUCKET_NAME}|${R2_BUCKET_NAME}|g" "$CONFIG_FILE"
-          sed -i "s|\${PROJECT_LINK}|${PROJECT_LINK}|g" "$CONFIG_FILE"
-          sed -i "s|\${LINUXDO_CLIENT_ID}|${LINUXDO_CLIENT_ID}|g" "$CONFIG_FILE"
-          sed -i "s|\${LINUXDO_CLIENT_SECRET}|${LINUXDO_CLIENT_SECRET}|g" "$CONFIG_FILE"
-          sed -i "s|\${LINUXDO_CALLBACK_URL}|${LINUXDO_CALLBACK_URL}|g" "$CONFIG_FILE"
-          sed -i "s|\${LINUXDO_SWITCH}|${LINUXDO_SWITCH}|g" "$CONFIG_FILE"
-          
-          echo "✅ Environment setup completed."
+          case "$DEPLOYMENT_MODE" in
+            existing|fresh) ;;
+            *) echo "❌ DEPLOYMENT_MODE must be existing or fresh."; exit 1 ;;
+          esac
 
-      - name: ⚡ 设置KV数据库 / Set up KV database
+          if [[ ${#JWT_SECRET} -lt 32 || "$JWT_SECRET" == *$'\n'* || "$JWT_SECRET" == *$'\r'* ]]; then
+            echo "❌ JWT_SECRET must be at least 32 characters and contain no CR/LF characters."
+            exit 1
+          fi
+
+          if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and length > 0)' <<< "$DOMAIN" >/dev/null; then
+            echo '❌ DOMAIN must be a non-empty JSON string array, for example ["example.com"].'
+            exit 1
+          fi
+
+          if [[ -z "$ADMIN" || -z "$CLOUDFLARE_ACCOUNT_ID" || -z "$CLOUDFLARE_API_TOKEN" ]]; then
+            echo "❌ ADMIN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN and JWT_SECRET are required."
+            exit 1
+          fi
+
+          if [[ ! "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-fA-F]{32}$ ]]; then
+            echo "❌ CLOUDFLARE_ACCOUNT_ID must be a 32-character hexadecimal account ID."
+            exit 1
+          fi
+
+          if [[ -n "$CUSTOM_DOMAIN" && ( "$CUSTOM_DOMAIN" == *"://"* || "$CUSTOM_DOMAIN" == */* ) ]]; then
+            echo "❌ CUSTOM_DOMAIN must be a host name only, for example mail.example.com."
+            exit 1
+          fi
+
+          validate_boolean AUTHELIA_SSO_SWITCH "$AUTHELIA_SSO_SWITCH"
+          validate_boolean AUTHELIA_AUTO_CREATE_USER "$AUTHELIA_AUTO_CREATE_USER"
+          validate_boolean AUTHELIA_REQUIRE_VERIFIED_EMAIL "$AUTHELIA_REQUIRE_VERIFIED_EMAIL"
+          validate_boolean AUTHELIA_LOGOUT_ENABLED "$AUTHELIA_LOGOUT_ENABLED"
+          validate_boolean CF_EMAIL_SEND_ENABLED "$CF_EMAIL_SEND_ENABLED"
+          validate_boolean WORKERS_AI_ENABLED "$WORKERS_AI_ENABLED"
+          validate_boolean AI_EMAIL_AGENT_ENABLED "$AI_EMAIL_AGENT_ENABLED"
+          if [[ -n "$ORM_LOG" ]]; then
+            validate_boolean ORM_LOG "$ORM_LOG"
+          fi
+
+          if [[ "$PRODUCTION_BINDINGS_CONFIRMED" != "true" ]]; then
+            echo "❌ Set PRODUCTION_BINDINGS_CONFIRMED=true only after copying every existing production binding into repository variables."
+            exit 1
+          fi
+
+          if [[ "$DEPLOYMENT_MODE" == "existing" && ( -z "$D1_DATABASE_ID" || -z "$KV_NAMESPACE_ID" || -z "$CUSTOM_DOMAIN" ) ]]; then
+            echo "❌ Existing-instance deployment requires explicit D1_DATABASE_ID, KV_NAMESPACE_ID and CUSTOM_DOMAIN."
+            exit 1
+          fi
+
+          if [[ -n "$D1_DATABASE_ID" && ! "$D1_DATABASE_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "❌ D1_DATABASE_ID must be a D1 UUID."
+            exit 1
+          fi
+
+          if [[ -n "$KV_NAMESPACE_ID" && ! "$KV_NAMESPACE_ID" =~ ^[0-9a-fA-F]{32}$ ]]; then
+            echo "❌ KV_NAMESPACE_ID must be a 32-character hexadecimal namespace ID."
+            exit 1
+          fi
+
+          if [[ "$AUTHELIA_SSO_SWITCH" == "true" ]]; then
+            if [[ "$AUTHELIA_ISSUER" != https://* || -z "$AUTHELIA_CLIENT_ID" || -z "$AUTHELIA_CLIENT_SECRET" ]]; then
+              echo "❌ Enabled Authelia SSO requires HTTPS AUTHELIA_ISSUER, AUTHELIA_CLIENT_ID and AUTHELIA_CLIENT_SECRET."
+              exit 1
+            fi
+            if [[ "$AUTHELIA_REDIRECT_URI" != https://*/api/auth/callback/authelia ]]; then
+              echo "❌ AUTHELIA_REDIRECT_URI must be the public HTTPS callback ending in /api/auth/callback/authelia."
+              exit 1
+            fi
+            if [[ " $AUTHELIA_SCOPES " != *" openid "* || " $AUTHELIA_SCOPES " != *" email "* ]]; then
+              echo "❌ AUTHELIA_SCOPES must include openid and email."
+              exit 1
+            fi
+            case "$AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD" in
+              client_secret_basic|client_secret_post) ;;
+              *) echo "❌ Unsupported AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD."; exit 1 ;;
+            esac
+          fi
+
+          if [[ "$AUTHELIA_LOGOUT_ENABLED" == "true" && "$AUTHELIA_LOGOUT_URL" != https://* ]]; then
+            echo "❌ AUTHELIA_LOGOUT_URL must be HTTPS when federated logout is enabled."
+            exit 1
+          fi
+
+          if [[ -n "$EMAIL_EVENTS_DEAD_LETTER_QUEUE" && -z "$EMAIL_EVENTS_QUEUE" ]]; then
+            echo "❌ EMAIL_EVENTS_DEAD_LETTER_QUEUE requires EMAIL_EVENTS_QUEUE."
+            exit 1
+          fi
+
+          if [[ "$AI_EMAIL_AGENT_ENABLED" == "true" && "$WORKERS_AI_ENABLED" != "true" ]]; then
+            echo "❌ AI_EMAIL_AGENT_ENABLED=true requires WORKERS_AI_ENABLED=true."
+            exit 1
+          fi
+
+          if [[ -n "$MAIL_BRIDGE_URL" && -z "$MAIL_BRIDGE_KEY" ]]; then
+            echo "❌ MAIL_BRIDGE_URL requires the MAIL_BRIDGE_KEY repository secret."
+            exit 1
+          fi
+
+          if [[ "$LINUXDO_SWITCH" == "true" && ( -z "$LINUXDO_CLIENT_ID" || -z "$LINUXDO_CALLBACK_URL" || -z "$LINUXDO_CLIENT_SECRET" ) ]]; then
+            echo "❌ LINUXDO_SWITCH=true requires the client ID, callback URL and LINUXDO_CLIENT_SECRET."
+            exit 1
+          fi
+
+          if [[ -z "$CUSTOM_DOMAIN" ]]; then
+            echo "::warning::CUSTOM_DOMAIN is not set; deployment will use workers.dev when available."
+          fi
+
+          echo "D1_DATABASE_NAME=${D1_DATABASE_NAME:-$NAME}" >> "$GITHUB_ENV"
+
+      - name: ⚡ 解析或创建 KV / Resolve or create KV namespace
         working-directory: ./mail-worker
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          
-          CONFIG_FILE="wrangler-action.toml"
-          
-          if [ -n "$KV_NAMESPACE_ID" ]; then
-            sed -i "s|\${KV_NAMESPACE_ID}|${KV_NAMESPACE_ID}|g" "$CONFIG_FILE"
-            echo "✅ Using the database from environment variables."
-            exit 0
+          set -euo pipefail
+
+          KV_ID="$KV_NAMESPACE_ID"
+          if [[ -z "$KV_ID" ]]; then
+            if [[ "$DEPLOYMENT_MODE" != "fresh" ]]; then
+              echo "❌ Refusing to auto-create KV outside DEPLOYMENT_MODE=fresh."
+              exit 1
+            fi
+            echo "🔍 KV_NAMESPACE_ID is unset; looking for namespace $NAME."
+            KV_LIST="$(wrangler kv namespace list)"
+            KV_ID="$(jq -r --arg name "$NAME" '[.[] | select(.title == $name)][0].id // empty' <<< "$KV_LIST")"
+            if [[ -z "$KV_ID" ]]; then
+              wrangler kv namespace create "$NAME"
+              KV_LIST="$(wrangler kv namespace list)"
+              KV_ID="$(jq -r --arg name "$NAME" '[.[] | select(.title == $name)][0].id // empty' <<< "$KV_LIST")"
+            fi
           fi
-          
-          echo "🔍 Checking if the database exists..."
-          
-          set +e
-            KV_LIST=$(pnpm wrangler kv namespace list 2>&1)
-            STATUS=$?
-          set -e
-          
-          if [ $STATUS -ne 0 ]; then
-            echo "$KV_LIST"
+
+          if [[ -z "$KV_ID" ]]; then
+            echo "❌ Unable to resolve the KV namespace ID."
             exit 1
           fi
-                  
-          if echo "$KV_LIST" | jq -e ".[] | select(.title == \"$NAME\")" >/dev/null; then
-            echo "✅ Database $NAME already exists."
-            KV_ID=$(echo "$KV_LIST" | jq -r ".[] | select(.title == \"$NAME\") | .id")
-            echo "KV_NAMESPACE_ID: $KV_ID"
-          else
-            echo "⚠️ Database $NAME does not exist. Starting creation..."
-            pnpm wrangler kv namespace create $NAME
-            KV_LIST=$(pnpm wrangler kv namespace list)
-            KV_ID=$(echo "$KV_LIST" | jq -r ".[] | select(.title == \"$NAME\") | .id")
-          fi
-          
-          sed -i "s|\${KV_NAMESPACE_ID}|$KV_ID|g" "$CONFIG_FILE"
-          echo "✅ Setup completed."
+          echo "RESOLVED_KV_NAMESPACE_ID=$KV_ID" >> "$GITHUB_ENV"
 
-      - name: 🐬 设置D1数据库 / Set up D1 database
+      - name: 🐬 解析或创建 D1 / Resolve or create D1 database
         working-directory: ./mail-worker
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          
-          CONFIG_FILE="wrangler-action.toml"
-          
-          if [ -n "$D1_DATABASE_ID" ]; then
-            sed -i "s|\${D1_DATABASE_ID}|${D1_DATABASE_ID}|g" "$CONFIG_FILE"
-            echo "✅ Using the database from environment variables."
-            exit 0
+          set -euo pipefail
+
+          D1_ID="$D1_DATABASE_ID"
+          if [[ -z "$D1_ID" ]]; then
+            if [[ "$DEPLOYMENT_MODE" != "fresh" ]]; then
+              echo "❌ Refusing to auto-create D1 outside DEPLOYMENT_MODE=fresh."
+              exit 1
+            fi
+            echo "🔍 D1_DATABASE_ID is unset; looking for database $D1_DATABASE_NAME."
+            DB_LIST="$(wrangler d1 list --json)"
+            D1_ID="$(jq -r --arg name "$D1_DATABASE_NAME" '[.[] | select(.name == $name)][0].uuid // empty' <<< "$DB_LIST")"
+            if [[ -z "$D1_ID" ]]; then
+              wrangler d1 create "$D1_DATABASE_NAME"
+              DB_LIST="$(wrangler d1 list --json)"
+              D1_ID="$(jq -r --arg name "$D1_DATABASE_NAME" '[.[] | select(.name == $name)][0].uuid // empty' <<< "$DB_LIST")"
+            fi
           fi
-          
-          echo "🔍 Checking if the database exists..."
-          
-          set +e
-            DB_LIST=$(pnpm wrangler d1 list --json 2>&1)
-            STATUS=$?
-          set -e
-          
-          if [ $STATUS -ne 0 ]; then
-            echo "$DB_LIST"
+
+          if [[ -z "$D1_ID" ]]; then
+            echo "❌ Unable to resolve the D1 database ID."
             exit 1
           fi
-          
-          if echo "$DB_LIST" | jq -e ".[] | select(.name == \"$NAME\")" >/dev/null; then
-            echo "✅ Database $NAME already exists."
-            D1_ID=$(echo "$DB_LIST" | jq -r ".[] | select(.name == \"$NAME\") | .uuid")
-            echo "D1_DATABASE_ID: $D1_ID"
-          else
-            echo "⚠️ Database $NAME does not exist. Starting creation..."
-            pnpm wrangler d1 create $NAME
-            DB_LIST=$(pnpm wrangler d1 list --json)
-            D1_ID=$(echo "$DB_LIST" | jq -r ".[] | select(.name == \"$NAME\") | .uuid")
-          fi
-          
-          sed -i "s|\${D1_DATABASE_ID}|$D1_ID|g" "$CONFIG_FILE"
-          echo "✅ Setup completed."
+          echo "RESOLVED_D1_DATABASE_ID=$D1_ID" >> "$GITHUB_ENV"
 
-      - name: 🚀 开始部署 / Start deployment
+      - name: 🧩 生成 Wrangler 配置 / Render Wrangler configuration
+        working-directory: ./mail-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ../scripts/render-wrangler-action.py wrangler-action.toml
+
+      - name: 🚀 安全注入密钥并部署 / Deploy with Worker secrets
         id: deploy
         working-directory: ./mail-worker
+        shell: bash
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          AUTHELIA_CLIENT_SECRET: ${{ secrets.AUTHELIA_CLIENT_SECRET }}
+          LINUXDO_CLIENT_SECRET: ${{ secrets.LINUXDO_CLIENT_SECRET }}
+          MAIL_BRIDGE_KEY: ${{ secrets.MAIL_BRIDGE_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
+          set -euo pipefail
+          SECRET_FILE="$RUNNER_TEMP/cloud-mail-worker-secrets.json"
+          trap 'rm -f "$SECRET_FILE"' EXIT
+          umask 077
+
+          jq -n \
+            --arg jwt "$JWT_SECRET" \
+            --arg authelia "$AUTHELIA_CLIENT_SECRET" \
+            --arg linuxdo "$LINUXDO_CLIENT_SECRET" \
+            --arg mailBridge "$MAIL_BRIDGE_KEY" \
+            '{
+              jwt_secret: $jwt,
+              authelia_client_secret: $authelia,
+              linuxdo_client_secret: $linuxdo,
+              MAIL_BRIDGE_KEY: $mailBridge
+            } | with_entries(select(.value != ""))' > "$SECRET_FILE"
+
           echo "🚀 Starting deployment..."
-          pnpm wrangler deploy -c wrangler-action.toml 2>&1 \
+          set +e
+          wrangler deploy \
+            --config wrangler-action.toml \
+            --secrets-file "$SECRET_FILE" 2>&1 \
             | tee deploy.log \
             | grep -v "https://.*\.workers\.dev" \
-            | sed -E 's/env\.domain .*/env.domain (***)/' \
-            || true
-          
+            | sed -E 's/env\.domain .*/env.domain (***)/'
           DEPLOY_EXIT_CODE=${PIPESTATUS[0]}
-          if [ $DEPLOY_EXIT_CODE -ne 0 ]; then
-            exit 1
+          set -e
+
+          if [[ $DEPLOY_EXIT_CODE -ne 0 ]]; then
+            exit "$DEPLOY_EXIT_CODE"
           fi
-          
-          WORKER_URL=$(grep -o "https://.*\.workers\.dev" deploy.log || echo "")
-          
-          if [ -n "$WORKER_URL" ]; then
+
+          WORKER_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' deploy.log | head -n 1 || true)"
+          if [[ -n "$WORKER_URL" ]]; then
             echo "::add-mask::$WORKER_URL"
           fi
-          
-          echo "worker_url=$WORKER_URL" >> $GITHUB_OUTPUT
-          echo "✅ Setup completed."
+          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
 
-      - name: ♻️ 初始化数据库 / Initialize database
+      - name: ♻️ 初始化或升级数据库 / Initialize or migrate database
+        shell: bash
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: |
-          echo "🛠️ Starting database initialization..."
-          sleep 15
-          
+          set -euo pipefail
           WORKER_URL="${CUSTOM_DOMAIN:+https://$CUSTOM_DOMAIN}"
           WORKER_URL="${WORKER_URL:-${{ steps.deploy.outputs.worker_url }}}"
-          
-          if [ -z "$WORKER_URL" ]; then
-            echo "❌ Preview URL not available. Please set CUSTOM_DOMAIN."
-            exit 1
-          fi
-          
-          HTTP_CODE=$(curl -sL -w "%{http_code}" -o response.txt "$WORKER_URL/api/init/${JWT_SECRET}")
-          RESPONSE_BODY=$(cat response.txt)
 
-          if [ "$RESPONSE_BODY" = "success" ]; then
-            echo "✅ Setup completed."
-          else
-            echo "❌ Failed. HTTP: $HTTP_CODE, Response: $RESPONSE_BODY"
+          if [[ -z "$WORKER_URL" ]]; then
+            echo "❌ No public Worker URL is available. Set CUSTOM_DOMAIN or enable workers.dev."
             exit 1
           fi
 
-      - name: 🗑️ 删除运行记录 / Delete workflow runs
-        uses: GitRML/delete-workflow-runs@main
-        continue-on-error: true
-        with:
-          retain_days: '1'
-          keep_minimum_runs: '0'
+          for attempt in 1 2 3 4 5 6; do
+            HTTP_CODE="$(curl --silent --show-error --request POST \
+              --header "X-Init-Secret: $JWT_SECRET" \
+              --write-out '%{http_code}' --output response.txt \
+              "$WORKER_URL/api/init" || true)"
+            RESPONSE_BODY="$(cat response.txt 2>/dev/null || true)"
+            if [[ "$HTTP_CODE" == "200" && "$RESPONSE_BODY" == "success" ]]; then
+              echo "✅ Database initialization/migration completed."
+              exit 0
+            fi
+            echo "Attempt $attempt/6 is not ready yet (HTTP ${HTTP_CODE:-none}); retrying..."
+            sleep 5
+          done
+
+          echo "❌ Database initialization failed."
+          exit 1

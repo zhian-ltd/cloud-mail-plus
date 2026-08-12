@@ -5,10 +5,10 @@ import {emailConst} from "../const/entity-const";
 const dbInit = {
 	async init(c) {
 
-		const secret = c.req.param('secret');
+		const secret = c.req.header('X-Init-Secret') || c.req.param('secret');
 
 		if (secret !== c.env.jwt_secret) {
-			return c.text('❌ JWT secret mismatch');
+			return c.text('❌ JWT secret mismatch', 401);
 		}
 
 		await this.intDB(c);

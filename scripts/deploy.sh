@@ -12,7 +12,7 @@ set -euo pipefail
 #   5. Patches mail-worker/wrangler.toml with bindings + vars
 #      (writes inside markers — re-runs replace, never duplicate)
 #   6. Runs `wrangler deploy` (auto-builds the Vue frontend)
-#   7. Calls /api/init/<jwt_secret> to initialize the D1 schema
+#   7. Calls POST /api/init with X-Init-Secret to initialize the D1 schema
 #   8. Saves state to .cloud-mail-deploy.env so re-runs skip prompts
 #
 # Usage:
@@ -430,10 +430,9 @@ set_authelia_secret() {
 
 # --- DB init ---
 init_db() {
-  step "7/7" "Initializing D1 schema via /api/init..."
+  step "7/7" "Initializing D1 schema via POST /api/init..."
   local code
-  # cloud-mail's init endpoint is GET /api/init/:secret
-  code=$(curl -s -o /tmp/cm-init.out -w "%{http_code}" "$WORKER_URL/api/init/$JWT_SECRET" || echo "000")
+  code=$(curl -s -X POST -H "X-Init-Secret: $JWT_SECRET" -o /tmp/cm-init.out -w "%{http_code}" "$WORKER_URL/api/init" || echo "000")
   if [[ "$code" =~ ^2 ]]; then
     ok "Database initialized"
   elif [ "$code" = "409" ] || grep -qiE "already|exists" /tmp/cm-init.out 2>/dev/null; then
@@ -442,7 +441,7 @@ init_db() {
     warn "Init returned HTTP $code:"
     cat /tmp/cm-init.out 2>/dev/null || true
     echo
-    warn "You may need to run manually: curl \"$WORKER_URL/api/init/<jwt_secret>\""
+    warn "You may need to run manually: curl -X POST -H 'X-Init-Secret: <jwt_secret>' '$WORKER_URL/api/init'"
   fi
   rm -f /tmp/cm-init.out
 }
@@ -479,7 +478,7 @@ $([ "${USE_AUTHELIA:-false}" = "true" ] && echo "    SSO:   ${AUTHELIA_ISSUER}")
 $([ "$USE_CF_EMAIL" = "true" ] && echo "    3. Cloudflare Dashboard → Email → Email Sending — onboard each domain")
 $([ "${USE_AI:-false}" = "true" ] && echo "    4. Settings → AI Email Agent → enable + (optionally) auto-draft replies")
 $([ "${USE_AUTHELIA:-false}" = "true" ] && echo "    SSO callback: ${AUTHELIA_REDIRECT_URI:-$WORKER_URL/api/auth/callback/authelia}")
-$([ "${USE_AUTHELIA:-false}" = "true" ] && echo "    Re-run /api/init/<jwt_secret> after upgrades to create sso_identity")
+$([ "${USE_AUTHELIA:-false}" = "true" ] && echo "    Re-run POST /api/init with X-Init-Secret after upgrades to create sso_identity")
 
   Re-deploy after code changes:
     bash scripts/deploy.sh --redeploy

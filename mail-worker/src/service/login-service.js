@@ -348,7 +348,8 @@ const loginService = {
 	},
 
 	async logout(c, userId) {
-		const token = userContext.getToken(c);
+		const token = await userContext.getToken(c);
+		if (!token) return;
 		const authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userId, { type: 'json' });
 		if (!authInfo || !Array.isArray(authInfo.tokens)) return;
 
