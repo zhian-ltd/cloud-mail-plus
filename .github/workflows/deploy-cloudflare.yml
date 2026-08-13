@@ -97,7 +97,7 @@ jobs:
         working-directory: ./mail-vue
 
       - name: 📌 安装锁定版本的 Wrangler / Install pinned Wrangler CLI
-        run: pnpm add --global wrangler@4.115.0
+        run: npm install --global wrangler@4.115.0
 
       - name: 📡 禁用 Wrangler 遥测 / Disable Wrangler telemetry
         working-directory: ./mail-worker
