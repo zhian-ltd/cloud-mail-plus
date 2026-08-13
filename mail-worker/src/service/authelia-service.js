@@ -187,7 +187,7 @@ async function getDiscoveryDocument(config) {
 
 	const response = await fetch(config.discoveryUrl, {
 		headers: { Accept: 'application/json' },
-		redirect: 'error',
+		redirect: 'manual',
 	});
 	if (!response.ok) {
 		throw new BizError(t('autheliaSsoDiscoveryFailed'), 502);
@@ -237,7 +237,7 @@ async function exchangeCode(config, discovery, code, codeVerifier) {
 		method: 'POST',
 		headers,
 		body: params.toString(),
-		redirect: 'error',
+		redirect: 'manual',
 	});
 	if (!response.ok) {
 		console.error('[authelia-sso] token exchange failed', response.status, await safeResponseText(response));
@@ -274,7 +274,7 @@ async function fetchUserInfo(discovery, accessToken) {
 			Accept: 'application/json',
 			Authorization: `Bearer ${accessToken}`,
 		},
-		redirect: 'error',
+		redirect: 'manual',
 	});
 	if (!response.ok) {
 		console.error('[authelia-sso] UserInfo request failed', response.status, await safeResponseText(response));
