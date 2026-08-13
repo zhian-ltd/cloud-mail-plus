@@ -19,6 +19,7 @@ const exclude = [
 	'/telegram',
 	'/test',
 	'/oauth',
+	'/auth',
 	'/external',
 	'/reset-admin'
 ];

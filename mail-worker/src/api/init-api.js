@@ -10,6 +10,10 @@ app.get('/init/:secret', (c) => {
 	return dbInit.init(c);
 })
 
+app.post('/init', (c) => {
+	return dbInit.init(c);
+})
+
 // Admin password reset (#292)
 // Usage: POST /api/reset-admin/<jwt_secret> -d '{"password":"newpassword"}'
 app.post('/reset-admin/:secret', async (c) => {

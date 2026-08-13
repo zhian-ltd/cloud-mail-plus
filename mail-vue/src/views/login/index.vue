@@ -44,6 +44,10 @@
           <el-button class="btn" type="primary" @click="submit" :loading="loginLoading"
           >{{ $t('loginBtn') }}
           </el-button>
+          <el-button class="btn" v-if="settingStore.settings.autheliaSsoSwitch" style="margin-top: 10px" @click="autheliaLogin">
+            <Icon icon="mingcute:key-2-line" width="18" height="18" style="margin-right: 8px"/>
+            {{ $t('loginWithSso') }}
+          </el-button>
           <el-button class="btn" v-if="settingStore.settings.linuxdoSwitch"  style="margin-top: 10px"  @click="linuxDoLogin">
             <el-avatar src="/image/linuxdo.webp" :size="18" style="margin-right: 10px" />LinuxDo
           </el-button>
@@ -93,6 +97,10 @@
           </div>
           <el-button class="btn" style="margin: 0" type="primary" @click="submitRegister" :loading="registerLoading"
           >{{ $t('regBtn') }}
+          </el-button>
+          <el-button class="btn" v-if="settingStore.settings.autheliaSsoSwitch" style="margin-top: 10px" @click="autheliaLogin">
+            <Icon icon="mingcute:key-2-line" width="18" height="18" style="margin-right: 8px"/>
+            {{ $t('loginWithSso') }}
           </el-button>
           <el-button v-if="settingStore.settings.linuxdoSwitch" class="btn" style="margin-top: 10px"  @click="linuxDoLogin">
             <el-avatar src="/image/linuxdo.webp" :size="18" style="margin-right: 10px" />LinuxDo
@@ -257,6 +265,10 @@ function linuxDoLogin() {
       `https://connect.linux.do/oauth2/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid+profile+email`
 }
 
+function autheliaLogin() {
+  window.location.assign(settingStore.settings.autheliaLoginUrl || '/api/auth/login/authelia')
+}
+
 linuxDoGetUser();
 
 async function linuxDoGetUser() {
@@ -391,6 +403,7 @@ const submit = () => {
 
 async function saveToken(token) {
   localStorage.setItem('token', token)
+  localStorage.removeItem('ssoProvider')
   const user = await loginUserInfo();
   accountStore.currentAccountId = user.account.accountId;
   accountStore.currentAccount = user.account;

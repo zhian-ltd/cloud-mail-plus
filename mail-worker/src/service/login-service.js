@@ -19,6 +19,7 @@ import dayjs from 'dayjs';
 import { toUtc } from '../utils/date-uitil';
 import { t } from '../i18n/i18n.js';
 import verifyRecordService from './verify-record-service';
+import { randomBase64Url } from '../utils/oidc-utils';
 
 const loginService = {
 
@@ -248,6 +249,7 @@ const loginService = {
 			throw new BizError(t('notExistUser'));
 		}
 
+		// Keep the original password-login status checks and error ordering.
 		if(userRow.isDel === isDel.DELETE) {
 			throw new BizError(t('isDelUser'));
 		}
@@ -256,12 +258,24 @@ const loginService = {
 			throw new BizError(t('isBanUser'));
 		}
 
-		if (!await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password) && !noVerifyPwd) {
+		if (!noVerifyPwd && !await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password)) {
 			throw new BizError(t('IncorrectPwd'));
 		}
 
+		return this.loginTrustedUser(c, userRow);
+	},
+
+	async loginTrustedUser(c, userRow, extraClaims = {}) {
+		if(userRow.isDel === isDel.DELETE) {
+			throw new BizError(t('isDelUser'));
+		}
+
+		if(userRow.status === userConst.status.BAN) {
+			throw new BizError(t('isBanUser'));
+		}
+
 		const uuid = uuidv4();
-		const jwt = await JwtUtils.generateToken(c,{ userId: userRow.userId, token: uuid });
+		const jwt = await JwtUtils.generateToken(c,{ ...extraClaims, userId: userRow.userId, token: uuid });
 
 		let authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userRow.userId, { type: 'json' });
 
@@ -291,14 +305,81 @@ const loginService = {
 		return jwt;
 	},
 
+	async ensureTrustedSsoUser(c, email, autoCreate = false) {
+		email = String(email || '').trim().toLowerCase();
+		if (!verifyUtils.isEmail(email)) throw new BizError(t('notEmail'));
+
+		const existingUser = await userService.selectByEmailIncludeDel(c, email);
+		if (existingUser) return existingUser;
+		if (!autoCreate) throw new BizError(t('autheliaSsoAutoCreateDisabled'), 403);
+
+		let { minEmailPrefix, emailPrefixFilter } = await settingService.query(c);
+		emailPrefixFilter = Array.isArray(emailPrefixFilter)
+			? emailPrefixFilter
+			: String(emailPrefixFilter || '').split(',').filter(Boolean);
+		const emailName = emailUtils.getName(email);
+
+		if (emailName.length < minEmailPrefix) throw new BizError(t('minEmailPrefix', { msg: minEmailPrefix }));
+		if (emailPrefixFilter.some(content => emailName.includes(content))) throw new BizError(t('banEmailPrefix'));
+		if (emailName.length > 64) throw new BizError(t('emailLengthLimit'));
+		if (!envDomains(c.env.domain).includes(emailUtils.getDomain(email))) throw new BizError(t('notEmailDomain'));
+
+		const accountRow = await accountService.selectByEmailIncludeDel(c, email);
+		if (accountRow?.isDel === isDel.DELETE) throw new BizError(t('isDelUser'));
+		if (accountRow) throw new BizError(t('isRegAccount'));
+
+		const roleRow = await roleService.selectDefaultRole(c);
+		if (!roleRow) throw new BizError(t('roleNotExist'));
+		if (!roleService.hasAvailDomainPerm(roleRow.availDomain, email)) {
+			throw new BizError(t('noDomainPermReg'), 403);
+		}
+
+		const { salt, hash } = await saltHashUtils.hashPassword(randomBase64Url(32));
+		const userId = await userService.insert(c, { email, password: hash, salt, type: roleRow.roleId });
+		await accountService.insert(c, { userId, email, name: emailName });
+		await userService.updateUserInfo(c, userId, true);
+
+		try {
+			await this.notifyNewUser(c, email);
+		} catch (error) {
+			console.error('[authelia-sso] new-user notification failed', error.message);
+		}
+		return userService.selectByIdIncludeDel(c, userId);
+	},
+
 	async logout(c, userId) {
-		const token =userContext.getToken(c);
+		const token = await userContext.getToken(c);
+		if (!token) return;
 		const authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userId, { type: 'json' });
+		if (!authInfo || !Array.isArray(authInfo.tokens)) return;
+
 		const index = authInfo.tokens.findIndex(item => item === token);
+		if (index === -1) return;
+
 		authInfo.tokens.splice(index, 1);
-		await c.env.kv.put(KvConst.AUTH_INFO + userId, JSON.stringify(authInfo));
+		if (!authInfo.tokens.length) {
+			await c.env.kv.delete(KvConst.AUTH_INFO + userId);
+			return;
+		}
+
+		await c.env.kv.put(
+			KvConst.AUTH_INFO + userId,
+			JSON.stringify(authInfo),
+			{ expirationTtl: constant.TOKEN_EXPIRE },
+		);
 	}
 
 };
+
+function envDomains(domain) {
+	if (Array.isArray(domain)) return domain;
+	if (typeof domain !== 'string') return [];
+	try {
+		const parsed = JSON.parse(domain);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return domain.split(',').map(item => item.trim()).filter(Boolean);
+	}
+}
 
 export default loginService;

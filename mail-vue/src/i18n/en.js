@@ -123,6 +123,7 @@ const en = {
     error404: '404 Not Found',
     home: 'Home',
     loginBtn: 'Sign in',
+    loginWithSso: 'Single Sign-On (SSO)',
     regBtn: 'Sign up',
     loginTitle: 'Sign in to your account to access email',
     regTitle: 'Sign up for an account to use email',

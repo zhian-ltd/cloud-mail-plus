@@ -150,6 +150,12 @@ Worker 内置 cron 定时任务，每天自动导出 D1 全量数据为 SQL 并 
 
 **集成栈**：[AI SDK v6](https://sdk.vercel.ai/) + `@ai-sdk/vue` v3 (`Chat` 类) + `workers-ai-provider` + Cloudflare Workers AI。完整中英文 i18n。
 
+### 9. Authelia SSO（OIDC）
+
+登录页可选显示“统一身份认证（SSO）”按钮。Worker 使用 OIDC Authorization Code Flow、`state`、`nonce` 和 S256 PKCE，在后端兑换授权码并验证 ID Token；本地账户以 `issuer + sub` 持久绑定，随后继续签发 Cloud Mail Plus 原生 JWT，原有密码登录和权限体系保持不变。
+
+配置、迁移和验证步骤见 [Authelia SSO 部署说明](docs/authelia-sso.md)。
+
 ---
 
 ## 部署

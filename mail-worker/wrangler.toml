@@ -68,6 +68,21 @@ crons = ["0 16 * * *"]	# Daily housekeeping at 16:00 UTC
 #admin = "admin@example.com"	# Admin email address
 #jwt_secret = ""				# Random string for JWT signing
 
+# --- Authelia SSO (optional) ---
+# Keep authelia_client_secret out of this file:
+#   npx wrangler secret put authelia_client_secret
+#authelia_sso_switch = "false"
+#authelia_issuer = "https://auth.example.com"
+#authelia_client_id = "cloud-mail-plus"
+#authelia_redirect_uri = "https://mail.example.com/api/auth/callback/authelia"
+#authelia_scopes = "openid profile email"
+#authelia_auto_create_user = "false"
+#authelia_require_verified_email = "true"
+#authelia_token_endpoint_auth_method = "client_secret_basic"
+#authelia_id_token_signing_alg = "RS256"
+#authelia_logout_enabled = "false"
+#authelia_logout_url = "https://auth.example.com/logout?rd=https%3A%2F%2Fmail.example.com%2Flogin"
+
 [build]
 command = "pnpm --prefix ../mail-vue install && pnpm --prefix ../mail-vue run build"
 
@@ -101,4 +116,3 @@ command = "pnpm --prefix ../mail-vue install && pnpm --prefix ../mail-vue run bu
 #max_batch_timeout = 5
 #max_retries = 3
 #dead_letter_queue = "email-events-dlq"
-

@@ -1,6 +1,7 @@
 name = "${NAME}"
 main = "src/index.js"
 compatibility_date = "2025-06-04"
+compatibility_flags = ["nodejs_compat"]
 
 [observability]
 enabled = true
@@ -11,7 +12,7 @@ custom_domain = true
 
 [[d1_databases]]
 binding = "db"
-database_name = "cloud-mail" # 数据库的名称
+database_name = "${D1_DATABASE_NAME}" # 数据库的名称
 database_id = "${D1_DATABASE_ID}" # 使用占位符引用环境变量
 
 [[kv_namespaces]]
@@ -21,6 +22,27 @@ id = "${KV_NAMESPACE_ID}" # 使用占位符引用环境变量
 [[r2_buckets]]
 binding = "r2"
 bucket_name = "${R2_BUCKET_NAME}" # 使用占位符引用环境变量
+
+[[send_email]]
+name = "EMAIL"
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "EMAIL_AGENT"
+class_name = "EmailAgent"
+
+[[migrations]]
+tag = "v1-add-email-agent"
+new_sqlite_classes = ["EmailAgent"]
+
+[[queues.consumers]]
+queue = "${EMAIL_EVENTS_QUEUE}"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "${EMAIL_EVENTS_DEAD_LETTER_QUEUE}"
 
 [assets]
 binding = "assets"		#静态资源绑定名默认不可修改
@@ -33,16 +55,26 @@ crons = ["0 16 * * *"]	#定时任务每天晚上12点执行
 
 
 [vars]
-#orm_log = false
+orm_log = "${ORM_LOG}"
 domain = "${DOMAIN}"				#邮件域名可可配置多个 示例: ["example1.com","example2.com"]
 admin = "${ADMIN}"				#管理员的邮箱	示例: admin@example.com
-jwt_secret = "${JWT_SECRET}"			#jwt令牌的密钥,随便填一串字符串
 project_link = "${PROJECT_LINK}"
+MAIL_BRIDGE_URL = "${MAIL_BRIDGE_URL}"
 
 linuxdo_client_id = "${LINUXDO_CLIENT_ID}"
-linuxdo_client_secret = "${LINUXDO_CLIENT_SECRET}"
 linuxdo_callback_url = "${LINUXDO_CALLBACK_URL}"
 linuxdo_switch = "${LINUXDO_SWITCH}"
 
-[build]
-command = "pnpm --prefix ../mail-vue install && pnpm --prefix ../mail-vue run build"
+# JWT, LinuxDo, bridge and Authelia secrets are uploaded alongside the deployment.
+authelia_sso_switch = "${AUTHELIA_SSO_SWITCH}"
+authelia_issuer = "${AUTHELIA_ISSUER}"
+authelia_discovery_url = "${AUTHELIA_DISCOVERY_URL}"
+authelia_client_id = "${AUTHELIA_CLIENT_ID}"
+authelia_redirect_uri = "${AUTHELIA_REDIRECT_URI}"
+authelia_scopes = "${AUTHELIA_SCOPES}"
+authelia_auto_create_user = "${AUTHELIA_AUTO_CREATE_USER}"
+authelia_require_verified_email = "${AUTHELIA_REQUIRE_VERIFIED_EMAIL}"
+authelia_token_endpoint_auth_method = "${AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD}"
+authelia_id_token_signing_alg = "${AUTHELIA_ID_TOKEN_SIGNING_ALG}"
+authelia_logout_enabled = "${AUTHELIA_LOGOUT_ENABLED}"
+authelia_logout_url = "${AUTHELIA_LOGOUT_URL}"
