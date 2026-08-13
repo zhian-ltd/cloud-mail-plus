@@ -251,7 +251,7 @@ Repository variables：
 | `AUTHELIA_CLIENT_ID` | 与 Authelia 配置完全一致的 Client ID |
 | `AUTHELIA_REDIRECT_URI` | `https://mail.example.com/api/auth/callback/authelia` |
 | `AUTHELIA_SCOPES` | `openid profile email` |
-| `AUTHELIA_AUTO_CREATE_USER` | `true`：没有同邮箱本地用户时，以 OIDC `preferred_username` 和首个 `DOMAIN` 域名创建邮箱 |
+| `AUTHELIA_AUTO_CREATE_USER` | `true`：没有同邮箱本地用户时，以 OIDC `preferred_username` 和首个 `DOMAIN` 域名创建邮箱。本 fork 的自动部署工作流已按生产要求固定启用；如需关闭，应将工作流中的该值改为 `false` |
 | `AUTHELIA_REQUIRE_VERIFIED_EMAIL` | `true` |
 | `AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD` | `client_secret_basic` |
 | `AUTHELIA_ID_TOKEN_SIGNING_ALG` | `RS256` |

@@ -54,7 +54,9 @@ jobs:
       AUTHELIA_CLIENT_ID: ${{ vars.AUTHELIA_CLIENT_ID }}
       AUTHELIA_REDIRECT_URI: ${{ vars.AUTHELIA_REDIRECT_URI }}
       AUTHELIA_SCOPES: ${{ vars.AUTHELIA_SCOPES || 'openid profile email' }}
-      AUTHELIA_AUTO_CREATE_USER: ${{ vars.AUTHELIA_AUTO_CREATE_USER || 'false' }}
+      # Production policy for this fork: a verified Authelia identity may create
+      # its Cloud Mail mailbox when no verified-email match already exists.
+      AUTHELIA_AUTO_CREATE_USER: 'true'
       AUTHELIA_REQUIRE_VERIFIED_EMAIL: ${{ vars.AUTHELIA_REQUIRE_VERIFIED_EMAIL || 'true' }}
       AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD: ${{ vars.AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD || 'client_secret_basic' }}
       AUTHELIA_ID_TOKEN_SIGNING_ALG: ${{ vars.AUTHELIA_ID_TOKEN_SIGNING_ALG || 'RS256' }}
