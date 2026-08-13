@@ -130,8 +130,6 @@ export function buildSsoAutoCreateEmail(providerEmail, providerUsername, configu
 	const domains = (Array.isArray(configuredDomains) ? configuredDomains : [])
 		.map(domain => String(domain || '').trim().toLowerCase())
 		.filter(Boolean);
-	const providerDomain = email.includes('@') ? email.split('@').pop() : '';
-	if (providerDomain && domains.includes(providerDomain)) return email;
 	if (!domains.length) throw new Error('No Cloud Mail domain is configured');
 
 	let username = String(providerUsername || '').trim().toLowerCase();

@@ -283,7 +283,7 @@ Cloudflare Secret 的旧值不可回读。不知道旧 `JWT_SECRET` 时可以生
 1. 验证 ID Token 和 UserInfo，取稳定的 `issuer + sub` 以及 email。
 2. 如果 D1 已存在该 `issuer + sub` 绑定，直接使用绑定的 `user_id`；即使以后 email 变化，也不会错绑到其他账户。
 3. 如果尚未绑定，以大小写不敏感方式查找同 email 的 Cloud Mail Plus 用户并建立绑定。
-4. 如果没有同 email 用户，仅在 `authelia_auto_create_user=true` 时创建用户：若 IdP 邮箱本身属于允许域名则直接使用；否则以 OIDC `preferred_username`（缺失时回退到已验证邮箱的本地部分）加首个 `DOMAIN` 域名生成本地邮箱。
+4. 如果没有同 email 用户，仅在 `authelia_auto_create_user=true` 时创建用户：始终优先以 OIDC `preferred_username`（缺失时回退到已验证邮箱的本地部分）加首个 `DOMAIN` 域名生成本地邮箱。
 5. 自动创建仍执行邮箱格式、允许域名、前缀规则、默认角色和角色域名权限检查。由用户名生成的目标邮箱若已存在会拒绝登录，绝不会按用户名接管旧账户。
 6. 已删除或已禁用用户仍由原生登录检查拒绝。
 

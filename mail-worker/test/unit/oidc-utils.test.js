@@ -62,12 +62,12 @@ describe('OIDC identity claims', () => {
 });
 
 describe('OIDC automatic local email selection', () => {
-	it('keeps a verified provider email that already uses an allowed domain', () => {
+	it('uses preferred_username even when the provider email uses an allowed domain', () => {
 		expect(buildSsoAutoCreateEmail(
 			'Alice@longlivehome.eu.org',
 			'another-name',
 			['longlivehome.eu.org'],
-		)).toBe('alice@longlivehome.eu.org');
+		)).toBe('another-name@longlivehome.eu.org');
 	});
 
 	it('uses preferred_username with the first configured Cloud Mail domain', () => {
