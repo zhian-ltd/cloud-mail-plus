@@ -111,7 +111,40 @@ export function validateIdentityClaims(idTokenClaims, userInfo, { requireVerifie
 		throw new Error('The identity provider did not verify the email address');
 	}
 
-	return { subject, email, emailVerified };
+	const username = String(
+		userInfo.preferred_username
+		|| idTokenClaims.preferred_username
+		|| userInfo.username
+		|| idTokenClaims.username
+		|| email.split('@')[0],
+	).trim().toLowerCase();
+	if (!username || username.length > 255) {
+		throw new Error('The identity provider did not return a valid username');
+	}
+
+	return { subject, email, emailVerified, username };
+}
+
+export function buildSsoAutoCreateEmail(providerEmail, providerUsername, configuredDomains) {
+	const email = String(providerEmail || '').trim().toLowerCase();
+	const domains = (Array.isArray(configuredDomains) ? configuredDomains : [])
+		.map(domain => String(domain || '').trim().toLowerCase())
+		.filter(Boolean);
+	const providerDomain = email.includes('@') ? email.split('@').pop() : '';
+	if (providerDomain && domains.includes(providerDomain)) return email;
+	if (!domains.length) throw new Error('No Cloud Mail domain is configured');
+
+	let username = String(providerUsername || '').trim().toLowerCase();
+	if (username.includes('@')) username = username.split('@')[0];
+	if (!username && email.includes('@')) username = email.split('@')[0];
+
+	if (!username
+		|| username.length > 64
+		|| !/^[a-z0-9._+-]+$/i.test(username)) {
+		throw new Error('The identity provider username cannot be used as an email prefix');
+	}
+
+	return `${username}@${domains[0]}`;
 }
 
 export async function verifyOidcIdToken(idToken, config, discovery, expectedNonce, keyResolver) {

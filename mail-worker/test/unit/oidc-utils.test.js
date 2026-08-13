@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	base64UrlEncode,
+	buildSsoAutoCreateEmail,
 	createOidcTransaction,
 	getAllowedIdTokenAlgorithms,
 	sanitizeReturnTo,
@@ -33,8 +34,8 @@ describe('OIDC identity claims', () => {
 	it('uses a matching sub and normalized verified email', () => {
 		expect(validateIdentityClaims(
 			{ sub: 'stable-subject' },
-			{ sub: 'stable-subject', email: 'User@Example.com ', email_verified: true },
-		)).toEqual({ subject: 'stable-subject', email: 'user@example.com', emailVerified: true });
+			{ sub: 'stable-subject', email: 'User@Example.com ', email_verified: true, preferred_username: 'Alice' },
+		)).toEqual({ subject: 'stable-subject', email: 'user@example.com', emailVerified: true, username: 'alice' });
 	});
 
 	it('rejects a UserInfo subject mismatch', () => {
@@ -56,7 +57,33 @@ describe('OIDC identity claims', () => {
 			{ sub: 'subject-a' },
 			{ sub: 'subject-a', email: 'user@example.com', email_verified: false },
 			{ requireVerifiedEmail: false },
-		)).toEqual({ subject: 'subject-a', email: 'user@example.com', emailVerified: false });
+		)).toEqual({ subject: 'subject-a', email: 'user@example.com', emailVerified: false, username: 'user' });
+	});
+});
+
+describe('OIDC automatic local email selection', () => {
+	it('keeps a verified provider email that already uses an allowed domain', () => {
+		expect(buildSsoAutoCreateEmail(
+			'Alice@longlivehome.eu.org',
+			'another-name',
+			['longlivehome.eu.org'],
+		)).toBe('alice@longlivehome.eu.org');
+	});
+
+	it('uses preferred_username with the first configured Cloud Mail domain', () => {
+		expect(buildSsoAutoCreateEmail(
+			'alice@example.net',
+			'Alice',
+			['longlivehome.eu.org'],
+		)).toBe('alice@longlivehome.eu.org');
+	});
+
+	it('rejects a username that cannot safely form an email prefix', () => {
+		expect(() => buildSsoAutoCreateEmail(
+			'alice@example.net',
+			'alice/../../admin',
+			['longlivehome.eu.org'],
+		)).toThrow(/email prefix/);
 	});
 });
 

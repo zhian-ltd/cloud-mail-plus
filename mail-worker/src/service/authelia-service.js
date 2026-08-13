@@ -151,7 +151,12 @@ const autheliaService = {
 				await ssoIdentityService.updateEmail(c, identity.identityId, providerIdentity.email);
 			}
 		} else {
-			userRow = await loginService.ensureTrustedSsoUser(c, providerIdentity.email, config.autoCreateUser);
+			userRow = await loginService.ensureTrustedSsoUser(
+				c,
+				providerIdentity.email,
+				config.autoCreateUser,
+				providerIdentity.username,
+			);
 			identity = await ssoIdentityService.bindOrGet(c, {
 				issuer,
 				subject: providerIdentity.subject,

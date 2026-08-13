@@ -84,6 +84,8 @@ const zh = {
 	autheliaSsoAuthorizedPartyInvalid: 'Authelia ID Token 授权方验证失败',
 	autheliaSsoUserInfoFailed: '无法读取 Authelia 用户信息',
 	autheliaSsoAutoCreateDisabled: '该邮箱尚未绑定本地用户，且自动创建已关闭',
+	autheliaSsoUsernameInvalid: 'SSO 用户名无法生成有效的本地邮箱地址',
+	autheliaSsoUsernameCollision: 'SSO 用户名对应的本地邮箱已存在，不能自动绑定',
 	autheliaSsoBoundUserMissing: 'SSO 身份绑定的本地用户不存在',
 	autheliaSsoIdentityBindFailed: '无法保存 SSO 身份绑定',
 	langNotSupported: '不支持的目标语言',

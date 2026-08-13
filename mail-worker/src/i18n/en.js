@@ -84,6 +84,8 @@ const en = {
 	autheliaSsoAuthorizedPartyInvalid: 'Authelia ID Token authorized-party validation failed',
 	autheliaSsoUserInfoFailed: 'Unable to load Authelia user information',
 	autheliaSsoAutoCreateDisabled: 'No local user matches this email and automatic creation is disabled',
+	autheliaSsoUsernameInvalid: 'The SSO username cannot produce a valid local email address',
+	autheliaSsoUsernameCollision: 'The local email derived from this SSO username already exists and cannot be auto-bound',
 	autheliaSsoBoundUserMissing: 'The local user bound to this SSO identity no longer exists',
 	autheliaSsoIdentityBindFailed: 'Unable to save the SSO identity binding',
 	langNotSupported: 'Target language not supported',

@@ -19,7 +19,7 @@ import dayjs from 'dayjs';
 import { toUtc } from '../utils/date-uitil';
 import { t } from '../i18n/i18n.js';
 import verifyRecordService from './verify-record-service';
-import { randomBase64Url } from '../utils/oidc-utils';
+import { buildSsoAutoCreateEmail, randomBase64Url } from '../utils/oidc-utils';
 
 const loginService = {
 
@@ -305,13 +305,26 @@ const loginService = {
 		return jwt;
 	},
 
-	async ensureTrustedSsoUser(c, email, autoCreate = false) {
+	async ensureTrustedSsoUser(c, email, autoCreate = false, providerUsername = '') {
 		email = String(email || '').trim().toLowerCase();
 		if (!verifyUtils.isEmail(email)) throw new BizError(t('notEmail'));
 
 		const existingUser = await userService.selectByEmailIncludeDel(c, email);
 		if (existingUser) return existingUser;
 		if (!autoCreate) throw new BizError(t('autheliaSsoAutoCreateDisabled'), 403);
+
+		const domains = envDomains(c.env.domain);
+		try {
+			email = buildSsoAutoCreateEmail(email, providerUsername, domains);
+		} catch {
+			throw new BizError(t('autheliaSsoUsernameInvalid'), 400);
+		}
+		if (!verifyUtils.isEmail(email)) throw new BizError(t('notEmail'));
+
+		// A verified provider email may bind an existing account. A derived username
+		// address may only create a new account, never take over an existing one.
+		const usernameCollision = await userService.selectByEmailIncludeDel(c, email);
+		if (usernameCollision) throw new BizError(t('autheliaSsoUsernameCollision'), 409);
 
 		let { minEmailPrefix, emailPrefixFilter } = await settingService.query(c);
 		emailPrefixFilter = Array.isArray(emailPrefixFilter)
@@ -322,7 +335,7 @@ const loginService = {
 		if (emailName.length < minEmailPrefix) throw new BizError(t('minEmailPrefix', { msg: minEmailPrefix }));
 		if (emailPrefixFilter.some(content => emailName.includes(content))) throw new BizError(t('banEmailPrefix'));
 		if (emailName.length > 64) throw new BizError(t('emailLengthLimit'));
-		if (!envDomains(c.env.domain).includes(emailUtils.getDomain(email))) throw new BizError(t('notEmailDomain'));
+		if (!domains.includes(emailUtils.getDomain(email))) throw new BizError(t('notEmailDomain'));
 
 		const accountRow = await accountService.selectByEmailIncludeDel(c, email);
 		if (accountRow?.isDel === isDel.DELETE) throw new BizError(t('isDelUser'));
