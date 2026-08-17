@@ -61,6 +61,12 @@ function rowConfig(row) {
 	};
 }
 
+async function databaseConfig(c) {
+	const row = await orm(c).select().from(setting).get();
+	if (!row) throw new BizError('Database not initialized', 503);
+	return rowConfig(row);
+}
+
 async function plaintextApiKey(c, encrypted) {
 	if (!encrypted) return '';
 	try {
@@ -77,8 +83,10 @@ const aiConfigService = {
 	},
 
 	async publicConfig(c) {
-		const row = await settingService.query(c);
-		const config = rowConfig(row);
+		// AI credentials must be read from D1, the source of truth. The general
+		// settings cache lives in eventually-consistent KV and can briefly return
+		// the previous provider/key after an administrator saves AI settings.
+		const config = await databaseConfig(c);
 		const workersAiAvailable = Boolean(c.env.AI);
 		const aiApiKeyConfigured = Boolean(config.apiKeyEncrypted);
 		return {
@@ -93,8 +101,7 @@ const aiConfigService = {
 	},
 
 	async save(c, input = {}) {
-		const currentRow = await settingService.query(c);
-		const current = rowConfig(currentRow);
+		const current = await databaseConfig(c);
 		const provider = normalizeProvider(input.aiProvider ?? current.provider);
 		const model = normalizeModel(
 			input.aiModel,
@@ -123,8 +130,7 @@ const aiConfigService = {
 	},
 
 	async resolveModel(c, override = null) {
-		const row = await settingService.query(c);
-		const saved = rowConfig(row);
+		const saved = await databaseConfig(c);
 		const provider = normalizeProvider(override?.aiProvider ?? saved.provider);
 		const modelId = normalizeModel(
 			override?.aiModel ?? saved.model,

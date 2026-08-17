@@ -12,6 +12,7 @@ onMounted(async () => {
 });
 
 function toggle() {
+  if (!enabled.value) return;
   store.panelVisible = !store.panelVisible;
 }
 </script>
@@ -20,6 +21,7 @@ function toggle() {
   <button
     class="agent-toggle icon-item"
     :class="{ active: store.panelVisible, disabled: !enabled }"
+    :disabled="!enabled"
     :title="enabled ? t('aiAgentChatTitle') : t('aiAgentEnable')"
     @click="toggle"
   >
@@ -65,6 +67,9 @@ function toggle() {
   background: #f3f4f6;
   border-color: #d1d5db;
   color: #6b7280;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 .agent-toggle-spark { font-size: 16px; }
 </style>

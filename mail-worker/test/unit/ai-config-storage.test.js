@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
 	row: {},
+	cachedRow: {},
 	refresh: vi.fn(),
 }));
 
 vi.mock('../../src/service/setting-service', () => ({
 	default: {
-		query: async () => state.row,
+		query: async () => state.cachedRow,
 		refresh: state.refresh,
 	},
 }));
@@ -16,6 +17,11 @@ vi.mock('../../src/entity/setting', () => ({ default: {} }));
 
 vi.mock('../../src/entity/orm', () => ({
 	default: () => ({
+		select: () => ({
+			from: () => ({
+				get: async () => state.row,
+			}),
+		}),
 		update: () => ({
 			set: values => ({
 				run: async () => { Object.assign(state.row, values); },
@@ -33,6 +39,7 @@ beforeEach(() => {
 		aiBaseUrl: 'https://api.openai.com/v1',
 		aiApiKeyEncrypted: '',
 	};
+	state.cachedRow = { ...state.row };
 	state.refresh.mockReset();
 });
 
@@ -69,5 +76,27 @@ describe('AI configuration storage', () => {
 			aiProvider: 'openai-compatible', aiModel: 'model', aiApiKey: '',
 		});
 		expect(state.row.aiApiKeyEncrypted).toBe(encrypted);
+	});
+
+	it('reads public AI status from D1 instead of stale KV settings', async () => {
+		state.row = {
+			aiProvider: 'openai-compatible',
+			aiModel: 'fresh-model',
+			aiBaseUrl: 'https://api.example.com/v1',
+			aiApiKeyEncrypted: 'v1:configured:key',
+		};
+		state.cachedRow = {
+			aiProvider: 'workers-ai',
+			aiModel: 'stale-model',
+			aiBaseUrl: 'https://api.openai.com/v1',
+			aiApiKeyEncrypted: '',
+		};
+
+		await expect(aiConfigService.publicConfig({ env: {} })).resolves.toMatchObject({
+			aiProvider: 'openai-compatible',
+			aiModel: 'fresh-model',
+			aiApiKeyConfigured: true,
+			aiReady: true,
+		});
 	});
 });

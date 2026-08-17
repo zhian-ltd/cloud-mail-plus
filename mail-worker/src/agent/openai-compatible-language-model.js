@@ -179,6 +179,27 @@ function errorMessage(body, status) {
 	return body?.error?.message || body?.message || `OpenAI-compatible API request failed (${status})`;
 }
 
+function isTransientError(error) {
+	const status = Number(error?.statusCode || 0);
+	if ([408, 409, 425, 429].includes(status) || status >= 500) return true;
+	return /(network connection lost|connection|fetch failed|socket|timed?\s*out|terminated|unexpected eof|before eof)/i
+		.test(String(error?.message || error || ''));
+}
+
+async function withTransientRetry(operation, maxAttempts = 3) {
+	let lastError;
+	for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+		try {
+			return await operation(attempt);
+		} catch (error) {
+			lastError = error;
+			if (!isTransientError(error) || attempt === maxAttempts - 1) throw error;
+			await new Promise(resolve => setTimeout(resolve, 50 * (2 ** attempt)));
+		}
+	}
+	throw lastError;
+}
+
 export class OpenAICompatibleLanguageModel {
 	constructor({ baseURL, apiKey, modelId, fetch: fetchImpl = globalThis.fetch }) {
 		this.specificationVersion = 'v3';
@@ -241,153 +262,155 @@ export class OpenAICompatibleLanguageModel {
 	}
 
 	async doGenerate(options) {
-		const { response, body } = await this.request(options, false);
-		const data = await response.json();
-		const choice = data.choices?.[0] || {};
-		const message = choice.message || {};
-		const content = [];
-		const text = typeof message.content === 'string'
-			? message.content
-			: (Array.isArray(message.content) ? message.content.map(part => part.text || '').join('') : '');
-		if (text) content.push({ type: 'text', text });
-		for (const call of message.tool_calls || []) {
-			content.push({
-				type: 'tool-call',
-				toolCallId: call.id || crypto.randomUUID(),
-				toolName: call.function?.name || '',
-				input: call.function?.arguments || '{}',
-			});
-		}
-		return {
-			content,
-			finishReason: mapFinishReason(choice.finish_reason),
-			usage: emptyUsage(data.usage),
-			request: { body },
-			response: {
-				id: data.id,
-				modelId: data.model,
-				timestamp: data.created ? new Date(data.created * 1000) : undefined,
-				headers: headersObject(response.headers),
-				body: data,
-			},
-			warnings: warningsFor(options),
-		};
+		return withTransientRetry(async () => {
+			const { response, body } = await this.request(options, false);
+			const data = await response.json();
+			const choice = data.choices?.[0] || {};
+			const message = choice.message || {};
+			const content = [];
+			const text = typeof message.content === 'string'
+				? message.content
+				: (Array.isArray(message.content) ? message.content.map(part => part.text || '').join('') : '');
+			if (text) content.push({ type: 'text', text });
+			for (const call of message.tool_calls || []) {
+				content.push({
+					type: 'tool-call',
+					toolCallId: call.id || crypto.randomUUID(),
+					toolName: call.function?.name || '',
+					input: call.function?.arguments || '{}',
+				});
+			}
+			return {
+				content,
+				finishReason: mapFinishReason(choice.finish_reason),
+				usage: emptyUsage(data.usage),
+				request: { body },
+				response: {
+					id: data.id,
+					modelId: data.model,
+					timestamp: data.created ? new Date(data.created * 1000) : undefined,
+					headers: headersObject(response.headers),
+					body: data,
+				},
+				warnings: warningsFor(options),
+			};
+		});
 	}
 
 	async doStream(options) {
-		const { response, body } = await this.request(options, true);
-		if (!response.body) throw new Error('OpenAI-compatible API returned an empty stream');
 		const warnings = warningsFor(options);
-		const stream = parseOpenAIStream(response.body, warnings);
+		const model = this;
+		const body = this.buildRequest(options, true);
+		// Buffer each upstream attempt until it reaches a valid finish signal.
+		// This makes it safe to retry a dropped provider stream without emitting
+		// duplicated partial text or incomplete tool-call JSON to the browser.
+		const stream = new ReadableStream({
+			async start(controller) {
+				controller.enqueue({ type: 'stream-start', warnings });
+				try {
+					const parts = await withTransientRetry(async () => {
+						const { response } = await model.request(options, true);
+						if (!response.body) throw new Error('OpenAI-compatible API returned an empty stream');
+						return collectOpenAIStream(response.body);
+					});
+					for (const part of parts) controller.enqueue(part);
+				} catch (error) {
+					controller.enqueue({ type: 'error', error });
+				} finally {
+					controller.close();
+				}
+			},
+		});
 		return {
 			stream,
 			request: { body },
-			response: { headers: headersObject(response.headers) },
+			response: {},
 		};
 	}
 }
 
-function parseOpenAIStream(body, warnings) {
-	return new ReadableStream({
-		async start(controller) {
-			const reader = body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = '';
-			let textStarted = false;
-			let textEnded = false;
-			let metadataSent = false;
-			let finished = false;
-			let finishReason;
-			let usage;
-			const toolCalls = new Map();
+async function collectOpenAIStream(body) {
+	const reader = body.getReader();
+	const decoder = new TextDecoder();
+	const parts = [];
+	let buffer = '';
+	let textStarted = false;
+	let metadataSent = false;
+	let doneSignal = false;
+	let finishReason;
+	let usage;
+	const toolCalls = new Map();
 
-			controller.enqueue({ type: 'stream-start', warnings });
-
-			const closeParts = () => {
-				if (finished) return;
-				finished = true;
-				if (textStarted && !textEnded) {
-					controller.enqueue({ type: 'text-end', id: 'text-0' });
-					textEnded = true;
+	const handleData = dataText => {
+		if (!dataText) return;
+		if (dataText === '[DONE]') {
+			doneSignal = true;
+			return;
+		}
+		let data;
+		try { data = JSON.parse(dataText); }
+		catch { return; }
+		if (!metadataSent && (data.id || data.model || data.created)) {
+			parts.push({
+				type: 'response-metadata',
+				id: data.id,
+				modelId: data.model,
+				timestamp: data.created ? new Date(data.created * 1000) : undefined,
+			});
+			metadataSent = true;
+		}
+		if (data.usage) usage = data.usage;
+		for (const choice of data.choices || []) {
+			const delta = choice.delta || {};
+			if (typeof delta.content === 'string' && delta.content) {
+				if (!textStarted) {
+					parts.push({ type: 'text-start', id: 'text-0' });
+					textStarted = true;
 				}
-				for (const call of toolCalls.values()) {
-					controller.enqueue({
-						type: 'tool-call',
-						toolCallId: call.id || crypto.randomUUID(),
-						toolName: call.name || '',
-						input: call.arguments || '{}',
-					});
-				}
-				controller.enqueue({
-					type: 'finish',
-					usage: emptyUsage(usage),
-					finishReason: mapFinishReason(finishReason || (toolCalls.size ? 'tool_calls' : 'stop')),
-				});
-				controller.close();
-			};
-
-			const handleData = dataText => {
-				if (!dataText) return;
-				if (dataText === '[DONE]') {
-					closeParts();
-					return;
-				}
-				let data;
-				try { data = JSON.parse(dataText); }
-				catch { return; }
-				if (!metadataSent && (data.id || data.model || data.created)) {
-					controller.enqueue({
-						type: 'response-metadata',
-						id: data.id,
-						modelId: data.model,
-						timestamp: data.created ? new Date(data.created * 1000) : undefined,
-					});
-					metadataSent = true;
-				}
-				if (data.usage) usage = data.usage;
-				for (const choice of data.choices || []) {
-					const delta = choice.delta || {};
-					if (typeof delta.content === 'string' && delta.content) {
-						if (!textStarted) {
-							controller.enqueue({ type: 'text-start', id: 'text-0' });
-							textStarted = true;
-						}
-						controller.enqueue({ type: 'text-delta', id: 'text-0', delta: delta.content });
-					}
-					for (const callDelta of delta.tool_calls || []) {
-						const key = callDelta.index ?? 0;
-						const current = toolCalls.get(key) || { id: '', name: '', arguments: '' };
-						if (callDelta.id) current.id = callDelta.id;
-						if (callDelta.function?.name) current.name += callDelta.function.name;
-						if (callDelta.function?.arguments) current.arguments += callDelta.function.arguments;
-						toolCalls.set(key, current);
-					}
-					if (choice.finish_reason) finishReason = choice.finish_reason;
-				}
-			};
-
-			try {
-				while (!finished) {
-					const { done, value } = await reader.read();
-					if (done) break;
-					buffer += decoder.decode(value, { stream: true });
-					const lines = buffer.split(/\r?\n/);
-					buffer = lines.pop() || '';
-					for (const line of lines) {
-						if (finished) break;
-						if (line.startsWith('data:')) handleData(line.slice(5).trim());
-					}
-				}
-				if (!finished && buffer.startsWith('data:')) handleData(buffer.slice(5).trim());
-				closeParts();
-			} catch (error) {
-				if (!finished) {
-					controller.enqueue({ type: 'error', error });
-					controller.close();
-				}
+				parts.push({ type: 'text-delta', id: 'text-0', delta: delta.content });
 			}
-		},
+			for (const callDelta of delta.tool_calls || []) {
+				const key = callDelta.index ?? 0;
+				const current = toolCalls.get(key) || { id: '', name: '', arguments: '' };
+				if (callDelta.id) current.id = callDelta.id;
+				if (callDelta.function?.name) current.name += callDelta.function.name;
+				if (callDelta.function?.arguments) current.arguments += callDelta.function.arguments;
+				toolCalls.set(key, current);
+			}
+			if (choice.finish_reason) finishReason = choice.finish_reason;
+		}
+	};
+
+	while (!doneSignal) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		buffer += decoder.decode(value, { stream: true });
+		const lines = buffer.split(/\r?\n/);
+		buffer = lines.pop() || '';
+		for (const line of lines) {
+			if (doneSignal) break;
+			if (line.startsWith('data:')) handleData(line.slice(5).trim());
+		}
+	}
+	if (!doneSignal && buffer.startsWith('data:')) handleData(buffer.slice(5).trim());
+	if (!doneSignal && !finishReason) {
+		throw new Error('OpenAI-compatible stream ended before a finish signal');
+	}
+	if (textStarted) parts.push({ type: 'text-end', id: 'text-0' });
+	for (const call of toolCalls.values()) {
+		parts.push({
+			type: 'tool-call',
+			toolCallId: call.id || crypto.randomUUID(),
+			toolName: call.name || '',
+			input: call.arguments || '{}',
+		});
+	}
+	parts.push({
+		type: 'finish',
+		usage: emptyUsage(usage),
+		finishReason: mapFinishReason(finishReason || (toolCalls.size ? 'tool_calls' : 'stop')),
 	});
+	return parts;
 }
 
 export function createOpenAICompatibleModel(config) {

@@ -50,7 +50,20 @@ const transport = new DefaultChatTransport({
     const headers = new Headers(init?.headers || {});
     const token = localStorage.getItem('token');
     if (token) headers.set('Authorization', token);
-    return fetch(url, { ...init, headers });
+    return fetch(url, { ...init, headers }).then(async response => {
+      const contentType = response.headers.get('content-type') || '';
+      if (response.ok && contentType.includes('text/event-stream')) return response;
+
+      let message = '';
+      try {
+        const payload = await response.clone().json();
+        message = payload?.message || payload?.error?.message || '';
+      } catch {
+        try { message = await response.clone().text(); }
+        catch { message = ''; }
+      }
+      throw new Error(message || `AI request failed (${response.status})`);
+    });
   },
 });
 

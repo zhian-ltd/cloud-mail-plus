@@ -169,6 +169,39 @@ describe('OpenAI-compatible LanguageModelV3 adapter', () => {
 		expect(parts.some(part => part.type === 'tool-result')).toBe(true);
 	});
 
+	it('retries a dropped upstream stream before exposing partial output', async () => {
+		let attempt = 0;
+		const fetchMock = vi.fn(async () => {
+			attempt += 1;
+			if (attempt === 1) {
+				return new Response(new ReadableStream({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode(
+							'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+						));
+						controller.error(new Error('Network connection lost.'));
+					},
+				}), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+			}
+			return new Response(
+				'data: {"choices":[{"delta":{"content":"complete"},"finish_reason":"stop"}]}\n\n' +
+				'data: [DONE]\n\n',
+				{ status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+			);
+		});
+		const model = createOpenAICompatibleModel({
+			baseURL: 'https://api.example.com/v1', apiKey: 'key', modelId: 'compatible-model', fetch: fetchMock,
+		});
+		const result = await model.doStream({
+			prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+		});
+		const parts = [];
+		for await (const part of result.stream) parts.push(part);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(parts.filter(part => part.type === 'text-delta').map(part => part.delta).join('')).toBe('complete');
+	});
+
 	it('returns provider errors without exposing the API key', async () => {
 		const model = createOpenAICompatibleModel({
 			baseURL: 'https://api.example.com/v1', apiKey: 'super-secret-key', modelId: 'model',
