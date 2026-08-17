@@ -124,7 +124,7 @@ export function buildTools({ env, userId, userEmail, aiModel, aiModelId }) {
     }),
 
     draftReply: tool({
-      description: 'Generate and persist a draft reply to a specific email. Returns draftId. Does NOT send.',
+      description: 'Generate and persist a draft reply to a specific email. MUST be called when the user asks to draft a reply; displaying reply text alone does not create a draft. Returns draftId. Does NOT send.',
       inputSchema: z.object({
         emailId: z.number().int().positive(),
         instructions: z.string().min(1).describe('What the reply should say'),

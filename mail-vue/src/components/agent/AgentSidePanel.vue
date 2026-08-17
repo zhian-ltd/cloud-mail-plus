@@ -11,6 +11,8 @@ import db from '@/db/db.js';
 import { userDraftStore } from '@/store/draft.js';
 import { useUserStore } from '@/store/user.js';
 import { useAccountStore } from '@/store/account.js';
+import { useEmailStore } from '@/store/email.js';
+import { useRoute } from 'vue-router';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
@@ -23,6 +25,8 @@ const store = useAgentStore();
 const draftStore = userDraftStore();
 const userStore = useUserStore();
 const accountStore = useAccountStore();
+const emailStore = useEmailStore();
+const route = useRoute();
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true }).use(taskLists);
 const scroller = ref(null);
 const input = ref('');
@@ -30,6 +34,18 @@ const input = ref('');
 // Token-aware transport so the JWT travels with each chat request.
 const transport = new DefaultChatTransport({
   api: '/api/agent/chat',
+  prepareSendMessagesRequest: ({ id, messages, body, trigger, messageId }) => ({
+    body: {
+      ...body,
+      id,
+      messages,
+      trigger,
+      messageId,
+      currentEmailId: route.name === 'content'
+        ? Number(emailStore.contentData.email?.emailId) || null
+        : null,
+    },
+  }),
   fetch: (url, init) => {
     const headers = new Headers(init?.headers || {});
     const token = localStorage.getItem('token');

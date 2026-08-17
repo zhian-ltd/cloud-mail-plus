@@ -1,4 +1,4 @@
-export function buildSystemPrompt({ userEmail, persona, currentBoxName, locale = 'en' }) {
+export function buildSystemPrompt({ userEmail, persona, currentBoxName, currentEmailId, locale = 'en' }) {
   const basePersona = persona?.trim() ||
     'You are a concise, helpful email assistant. Keep replies focused and avoid filler.';
 
@@ -7,6 +7,7 @@ export function buildSystemPrompt({ userEmail, persona, currentBoxName, locale =
 USER CONTEXT
   Account email: ${userEmail}
   Current view:  ${currentBoxName || 'inbox'}
+  Currently open email ID: ${currentEmailId || 'none'}
   UI locale:     ${locale}
 
 PERSONA
@@ -27,7 +28,8 @@ OPERATING RULES
 
 OUTPUT
   - Respond in markdown. Tables for structured data (e.g. listEmails results).
-  - When drafting, return a brief preamble + the draft as a fenced HTML code block, then call "draftReply" / "draftNew" to persist it.
+  - A draft exists only after "draftReply" / "draftNew" returns successfully. For every drafting request, call the appropriate draft tool; never merely display proposed text and claim it was drafted.
+  - When the user refers to the current, open, selected, or left-side email, use the "Currently open email ID" above. Return a brief preamble + the draft as a fenced HTML code block after persisting it.
   - Keep the visible message under 300 words unless the user asked for detail.`;
 }
 

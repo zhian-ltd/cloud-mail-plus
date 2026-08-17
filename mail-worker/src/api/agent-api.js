@@ -8,6 +8,7 @@ import { buildSystemPrompt } from '../agent/system-prompt';
 import aiConfigService from '../service/ai-config-service';
 import emailService from '../service/email-service';
 import { uiMessagesToModelMessages } from '../agent/message-utils';
+import { currentEmailDraftStep, latestUserText, requestsCurrentEmailReplyDraft } from '../agent/draft-intent';
 
 // ---- chat: AI SDK v6 streaming, direct (no DO routing — protocol mismatch with AIChatAgent) ----
 app.post('/agent/chat', async (c) => {
@@ -23,6 +24,12 @@ app.post('/agent/chat', async (c) => {
 
   // Accept both shapes: UI messages array or already-converted model messages
   const uiMessages = Array.isArray(body?.messages) ? body.messages : [];
+  const requestedCurrentEmailId = Number(body?.currentEmailId);
+  const currentEmailId = Number.isInteger(requestedCurrentEmailId) && requestedCurrentEmailId > 0
+    ? requestedCurrentEmailId
+    : 0;
+  const forceCurrentEmailDraft = currentEmailId > 0 &&
+    requestsCurrentEmailReplyDraft(latestUserText(uiMessages));
   console.log('[agent/chat] request body keys:', Object.keys(body || {}), 'msg count:', uiMessages.length);
 
   // Build ModelMessage[] manually — convertToModelMessages in AI SDK v6 produces
@@ -53,10 +60,15 @@ app.post('/agent/chat', async (c) => {
         userEmail: user.email,
         persona: user.agentPersona || '',
         currentBoxName: c.req.query('box') || 'inbox',
+        currentEmailId,
         locale: c.req.header('Accept-Language')?.split(',')[0] || 'en',
       }),
       messages: modelMessages,
       tools,
+      prepareStep: ({ steps }) => currentEmailDraftStep({
+        steps,
+        forceDraftReply: forceCurrentEmailDraft,
+      }),
       stopWhen: stepCountIs(8),
       onError: (err) => {
         const msg = err?.error?.message || err?.message || JSON.stringify(err);
