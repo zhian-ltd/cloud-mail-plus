@@ -30,8 +30,8 @@
         </div>
       </div>
     </div>
-    <AgentSettings />
     <PersonalPushSettings />
+    <AgentSettings />
     <div class="del-email" v-perm="'my:delete'">
       <div class="title">{{$t('deleteUser')}}</div>
       <div style="color: var(--regular-text-color);">
