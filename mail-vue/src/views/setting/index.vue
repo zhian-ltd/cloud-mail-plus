@@ -53,7 +53,6 @@
 import {reactive, ref, defineOptions} from 'vue'
 import {resetPassword, userDelete} from "@/request/my.js";
 import {useUserStore} from "@/store/user.js";
-import router from "@/router/index.js";
 import {accountSetName} from "@/request/account.js";
 import {useAccountStore} from "@/store/account.js";
 import {useI18n} from "vue-i18n";
@@ -123,7 +122,8 @@ const deleteConfirm = () => {
   }).then(() => {
     userDelete().then(() => {
       localStorage.removeItem('token');
-      router.replace('/login');
+      localStorage.removeItem('ssoProvider');
+      window.location.replace('/login');
       ElMessage({
         message: t('delSuccessMsg'),
         type: 'success',

@@ -17,6 +17,8 @@ export default defineConfig(({mode}) => {
         base: env.VITE_STATIC_URL || '/',
         plugins: [vue(),
             VitePWA({
+                // Activate new workers without forcing open compose windows to reload.
+                registerType: 'autoUpdate',
                 injectRegister: 'script-defer',
                 manifest: {
                     name: env.VITE_PWA_NAME,
@@ -32,6 +34,8 @@ export default defineConfig(({mode}) => {
                     ],
                 },
                 workbox: {
+                    skipWaiting: true,
+                    clientsClaim: true,
                     disableDevLogs: true,
                     globPatterns: [],
                     runtimeCaching: [],

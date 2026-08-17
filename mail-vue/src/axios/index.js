@@ -1,5 +1,4 @@
 import axios from "axios";
-import router from "@/router";
 import i18n from "@/i18n/index.js";
 import {useSettingStore} from "@/store/setting.js";
 
@@ -35,7 +34,7 @@ http.interceptors.response.use((res) => {
                 })
                 localStorage.removeItem('token')
                 localStorage.removeItem('ssoProvider')
-                router.replace('/login')
+                window.location.replace('/login')
                 reject(data)
             } else if (data.code === 403) {
                 ElMessage({
@@ -118,4 +117,3 @@ http.interceptors.response.use((res) => {
     })
 
 export default http
-

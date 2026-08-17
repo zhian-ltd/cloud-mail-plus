@@ -112,7 +112,6 @@ import {useWriterStore} from "@/store/writer.js";
 import db from "@/db/db.js";
 import dayjs from "dayjs";
 import {useI18n} from "vue-i18n";
-import router from "@/router/index.js";
 import {ElMessageBox} from "element-plus";
 
 defineExpose({
@@ -388,7 +387,8 @@ async function sendEmail() {
     })
     if (e.code === 401) {
       localStorage.removeItem('token');
-      router.replace('/login');
+      localStorage.removeItem('ssoProvider');
+      window.location.replace('/login');
     }
     show.value = true
     addRecipientRecord();

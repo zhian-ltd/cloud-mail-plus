@@ -77,7 +77,6 @@
 </template>
 
 <script setup>
-import router from "@/router";
 import hanburger from '@/components/hamburger/index.vue'
 import AgentToggle from '@/components/agent/AgentToggle.vue'
 import {logout} from "@/request/login.js";
@@ -262,7 +261,7 @@ async function clickLogout() {
     window.location.replace('/api/auth/logout/authelia')
     return
   }
-  await router.replace('/login')
+  window.location.replace('/login')
 }
 
 function formatName(email) {
