@@ -109,13 +109,32 @@ function convertPrompt(prompt, useDeveloperRole) {
 	return messages;
 }
 
+function hasUnsupportedRegexFeature(pattern) {
+	// OpenAI's JSON Schema regex engine does not support lookarounds or
+	// backreferences. Zod's built-in email regex currently contains negative
+	// lookaheads, even though the original Zod schema remains valid for local
+	// tool-argument validation inside the AI SDK.
+	return /\(\?(?:[=!]|<[=!])|\\[1-9]/.test(pattern);
+}
+
+function compatibleJsonSchema(value) {
+	if (Array.isArray(value)) return value.map(compatibleJsonSchema);
+	if (!value || typeof value !== 'object') return value;
+	const compatible = {};
+	for (const [key, child] of Object.entries(value)) {
+		if (key === 'pattern' && typeof child === 'string' && hasUnsupportedRegexFeature(child)) continue;
+		compatible[key] = compatibleJsonSchema(child);
+	}
+	return compatible;
+}
+
 function convertTools(tools = []) {
 	return tools.filter(tool => tool.type === 'function').map(tool => ({
 		type: 'function',
 		function: {
 			name: tool.name,
 			description: tool.description,
-			parameters: tool.inputSchema,
+			parameters: compatibleJsonSchema(tool.inputSchema),
 			...(tool.strict === undefined ? {} : { strict: tool.strict }),
 		},
 	}));
@@ -136,7 +155,7 @@ function responseFormat(format) {
 		json_schema: {
 			name: format.name || 'response',
 			description: format.description,
-			schema: format.schema,
+			schema: compatibleJsonSchema(format.schema),
 			strict: true,
 		},
 	};

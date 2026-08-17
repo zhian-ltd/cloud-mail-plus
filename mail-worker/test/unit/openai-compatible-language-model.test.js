@@ -60,6 +60,33 @@ describe('OpenAI-compatible LanguageModelV3 adapter', () => {
 		expect(fetchMock).toHaveBeenCalledWith('https://api.example.com/v1/chat/completions', expect.any(Object));
 	});
 
+	it('removes unsupported regex lookarounds from provider tool schemas while retaining the tool schema locally', async () => {
+		const emailSchema = z.object({ from: z.string().email().optional() });
+		const fetchMock = vi.fn(async (_url, init) => {
+			const request = JSON.parse(init.body);
+			const providerSchema = request.tools[0].function.parameters;
+			expect(providerSchema.properties.from.pattern).toBeUndefined();
+			expect(providerSchema.properties.from.format).toBe('email');
+			return jsonResponse({
+				choices: [{ message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+				usage: {},
+			});
+		});
+		const model = createOpenAICompatibleModel({
+			baseURL: 'https://api.example.com/v1', apiKey: 'key', modelId: 'compatible-model', fetch: fetchMock,
+		});
+
+		await generateText({
+			model,
+			prompt: 'Find messages from a sender',
+			tools: {
+				searchEmails: tool({ description: 'Search email', inputSchema: emailSchema }),
+			},
+		});
+
+		expect(emailSchema.safeParse({ from: 'not-an-email' }).success).toBe(false);
+	});
+
 	it('converts non-streaming tool calls', async () => {
 		const model = createOpenAICompatibleModel({
 			baseURL: 'https://api.example.com/v1', apiKey: 'key', modelId: 'compatible-model',
