@@ -2,7 +2,7 @@ import { generateText, tool } from 'ai';
 import { z } from 'zod';
 import { eq, and, like, gte, lte, desc } from 'drizzle-orm';
 import emailService from '../service/email-service';
-import cfEmailService from '../service/cf-email-service';
+import accountService from '../service/account-service';
 import attService from '../service/att-service';
 import orm from '../entity/orm';
 import { email as emailEntity } from '../entity/email';
@@ -242,16 +242,64 @@ export async function executeConfirmedTool({ env, userId, userEmail, name, args 
   if (name === 'sendDraft') {
 	const draft = await emailService.draftDetail(c, args.draftId, userId);
     if (!draft) return { error: 'Draft not found' };
-    const r = await cfEmailService.send(env, {
-      from: { email: userEmail, name: userEmail.split('@')[0] },
-      to: draft.toEmail,
-      subject: draft.subject,
-      html: draft.content,
-      text: draft.text,
-      headers: draft.inReplyTo ? { 'In-Reply-To': draft.inReplyTo, References: draft.relation } : {},
-    });
-    await emailService.markSent(c, args.draftId, userId, r);
-    return { sent: true, messageId: r?.messageId || '' };
+
+	let receiveEmail = [];
+	try {
+	  const recipients = JSON.parse(draft.recipient || '[]');
+	  if (Array.isArray(recipients)) {
+		receiveEmail = recipients
+		  .map(recipient => String(recipient?.address || '').trim())
+		  .filter(Boolean);
+	  }
+	} catch (error) {
+	  console.warn('[agent/sendDraft] unable to parse draft recipients:', error?.message);
+	}
+	if (receiveEmail.length === 0 && draft.toEmail) {
+	  receiveEmail = [String(draft.toEmail).trim()].filter(Boolean);
+	}
+	if (receiveEmail.length === 0) return { error: 'Draft has no recipient' };
+
+	let accountId = Number(draft.accountId) || 0;
+	let accountRow;
+	if (!accountId) {
+	  accountRow = await accountService.selectByEmailIncludeDel(c, draft.sendEmail || userEmail);
+	  accountId = Number(accountRow?.accountId) || 0;
+	}
+
+	let metadata = {};
+	try {
+	  metadata = JSON.parse(draft.aiMetadata || '{}');
+	} catch (error) {
+	  console.warn('[agent/sendDraft] unable to parse draft metadata:', error?.message);
+	}
+	const sourceEmailId = Number(metadata.sourceEmailId) || 0;
+	const [sentEmail] = await emailService.send(c, {
+	  accountId,
+	  name: draft.name || accountRow?.name || userEmail.split('@')[0],
+	  sendType: sourceEmailId ? 'reply' : '',
+	  emailId: sourceEmailId,
+	  receiveEmail: [...new Set(receiveEmail)],
+	  text: draft.text || '',
+	  content: draft.content || '',
+	  subject: draft.subject || '',
+	  attachments: [],
+	}, userId);
+
+	// Native send persists a new sent-mail row. Remove the source draft only after
+	// that operation succeeds so a failed send remains available for retry.
+	try {
+	  await emailService.deleteDraft(c, args.draftId, userId);
+	} catch (error) {
+	  // The email was already sent. Do not turn a cleanup failure into a retry that
+	  // could send a duplicate; the stale draft can still be removed manually.
+	  console.error('[agent/sendDraft] sent but unable to remove draft:', error);
+	}
+
+	return {
+	  sent: true,
+	  emailId: sentEmail?.emailId || 0,
+	  messageId: sentEmail?.messageId || sentEmail?.resendEmailId || '',
+	};
   }
   if (name === 'deleteEmail') {
     if (args.permanent) await emailService.permanentDelete(c, args.emailId, userId);
