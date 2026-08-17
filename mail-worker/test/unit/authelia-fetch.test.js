@@ -65,3 +65,35 @@ describe('Authelia outbound requests', () => {
 		expect(context.env.kv.put).not.toHaveBeenCalled();
 	});
 });
+
+describe('Authelia federated logout configuration', () => {
+	it('publishes and returns only the fixed HTTPS logout URL when enabled', () => {
+		const logoutUrl = 'https://auth.example.test/logout?rd=https%3A%2F%2Fmail.example.test%2Flogin';
+		const context = {
+			req: { url: 'https://mail.example.test/api/auth/logout/authelia' },
+			env: {
+				authelia_sso_switch: 'true',
+				authelia_issuer: 'https://auth.example.test',
+				authelia_logout_enabled: 'true',
+				authelia_logout_url: logoutUrl,
+			},
+		};
+
+		expect(autheliaService.getPublicConfig(context).logoutEnabled).toBe(true);
+		expect(autheliaService.getLogoutUrl(context)).toBe(logoutUrl);
+	});
+
+	it('keeps provider logout disabled without an explicit URL', () => {
+		const context = {
+			req: { url: 'https://mail.example.test/api/auth/logout/authelia' },
+			env: {
+				authelia_sso_switch: 'true',
+				authelia_issuer: 'https://auth.example.test',
+				authelia_logout_enabled: 'true',
+			},
+		};
+
+		expect(autheliaService.getPublicConfig(context).logoutEnabled).toBe(false);
+		expect(autheliaService.getLogoutUrl(context)).toBeNull();
+	});
+});

@@ -13,7 +13,7 @@
         <span class="form-title">{{ settingStore.settings.title }}</span>
         <span class="form-desc" v-if="show === 'login'">{{ $t('loginTitle') }}</span>
         <span class="form-desc" v-else>{{ $t('regTitle') }}</span>
-        <div v-show="show === 'login'">
+        <form v-show="show === 'login'" @submit.prevent="submit">
           <el-input :class="settingStore.settings.loginDomain === 0 ? 'email-input' : ''" v-model="form.email"
                     type="text" :placeholder="$t('emailAccount')" autocomplete="off">
             <template #append v-if="settingStore.settings.loginDomain === 0">
@@ -24,6 +24,7 @@
                     v-model="suffix"
                     :placeholder="$t('select')"
                     class="select"
+                    :tabindex="-1"
                 >
                   <el-option
                       v-for="item in domainList"
@@ -39,19 +40,19 @@
               </div>
             </template>
           </el-input>
-          <el-input v-model="form.password" :placeholder="$t('password')" type="password" autocomplete="off">
+          <el-input v-model="form.password" :placeholder="$t('password')" type="password" autocomplete="current-password">
           </el-input>
-          <el-button class="btn" type="primary" @click="submit" :loading="loginLoading"
+          <el-button class="btn" type="primary" native-type="submit" :loading="loginLoading"
           >{{ $t('loginBtn') }}
           </el-button>
-          <el-button class="btn" v-if="settingStore.settings.autheliaSsoSwitch" style="margin-top: 10px" @click="autheliaLogin">
+          <el-button class="btn" v-if="settingStore.settings.autheliaSsoSwitch" native-type="button" style="margin-top: 10px" @click="autheliaLogin">
             <Icon icon="mingcute:key-2-line" width="18" height="18" style="margin-right: 8px"/>
             {{ $t('loginWithSso') }}
           </el-button>
-          <el-button class="btn" v-if="settingStore.settings.linuxdoSwitch"  style="margin-top: 10px"  @click="linuxDoLogin">
+          <el-button class="btn" v-if="settingStore.settings.linuxdoSwitch" native-type="button" style="margin-top: 10px" @click="linuxDoLogin">
             <el-avatar src="/image/linuxdo.webp" :size="18" style="margin-right: 10px" />LinuxDo
           </el-button>
-        </div>
+        </form>
         <div v-show="show !== 'login'">
           <el-input class="email-input" v-model="registerForm.email" type="text" :placeholder="$t('emailAccount')"
                     autocomplete="off">
@@ -363,6 +364,8 @@ function bind() {
 }
 
 const submit = () => {
+
+  if (loginLoading.value) return
 
   if (!form.email) {
     ElMessage({

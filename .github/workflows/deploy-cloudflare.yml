@@ -60,8 +60,10 @@ jobs:
       AUTHELIA_REQUIRE_VERIFIED_EMAIL: ${{ vars.AUTHELIA_REQUIRE_VERIFIED_EMAIL || 'true' }}
       AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD: ${{ vars.AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD || 'client_secret_basic' }}
       AUTHELIA_ID_TOKEN_SIGNING_ALG: ${{ vars.AUTHELIA_ID_TOKEN_SIGNING_ALG || 'RS256' }}
-      AUTHELIA_LOGOUT_ENABLED: ${{ vars.AUTHELIA_LOGOUT_ENABLED || 'false' }}
-      AUTHELIA_LOGOUT_URL: ${{ vars.AUTHELIA_LOGOUT_URL }}
+      # Authelia does not advertise RP-Initiated Logout. This production fork
+      # explicitly clears the Authelia portal session and returns to Cloud Mail.
+      AUTHELIA_LOGOUT_ENABLED: 'true'
+      AUTHELIA_LOGOUT_URL: 'https://auth.longlivehome.eu.org/logout?rd=https%3A%2F%2Fmail.longlivehome.eu.org%2Flogin'
 
     outputs:
       worker_url: ${{ steps.deploy.outputs.worker_url }}

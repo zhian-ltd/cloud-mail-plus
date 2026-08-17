@@ -85,7 +85,8 @@ identity_providers:
         client_name: 'Cloud Mail Plus'
         client_secret: '$pbkdf2-sha512$替换为上一步生成的哈希'
         public: false
-        authorization_policy: 'two_factor'
+        authorization_policy: 'one_factor'
+        consent_mode: 'implicit'
         require_pkce: true
         pkce_challenge_method: 'S256'
         redirect_uris:
@@ -103,6 +104,8 @@ identity_providers:
         userinfo_signed_response_alg: 'none'
         token_endpoint_auth_method: 'client_secret_basic'
 ```
+
+本部署按单因素、无重复同意页的使用要求配置。`consent_mode: 'implicit'` 会在已有 Authelia 登录会话时自动视为用户同意；Cloud Mail Plus 不请求 `offline_access`，也不会取得 Refresh Token。Authelia 官方提示 `implicit` 不属于标准 OIDC 同意模式且不建议用于不受信任客户端，因此只应对这个受控的机密客户端启用，不能作为所有客户端的全局默认值。若以后希望恢复显式同意，删除该行或改为 `explicit`；若希望首次同意后记忆一段时间，可改为 `pre-configured` 并配置 `pre_configured_consent_duration`。
 
 重启或重载 Authelia 后，再次读取 Discovery，确认服务正常：
 
@@ -255,8 +258,8 @@ Repository variables：
 | `AUTHELIA_REQUIRE_VERIFIED_EMAIL` | `true` |
 | `AUTHELIA_TOKEN_ENDPOINT_AUTH_METHOD` | `client_secret_basic` |
 | `AUTHELIA_ID_TOKEN_SIGNING_ALG` | `RS256` |
-| `AUTHELIA_LOGOUT_ENABLED` | 初次部署建议 `false` |
-| `AUTHELIA_LOGOUT_URL` | 仅启用联动退出时填写完整 HTTPS URL |
+| `AUTHELIA_LOGOUT_ENABLED` | `true`；本 fork 的生产工作流已固定启用联动退出 |
+| `AUTHELIA_LOGOUT_URL` | `https://auth.longlivehome.eu.org/logout?rd=https%3A%2F%2Fmail.longlivehome.eu.org%2Flogin`；本 fork 的生产工作流已固定此值 |
 | `PROJECT_LINK` | 可选的项目链接 |
 | `ORM_LOG` | 可选；需要 Drizzle SQL 日志时填 `true`，否则留空或填 `false` |
 | `MAIL_BRIDGE_URL` | 可选；使用 Stalwart sent-mail bridge 时填写服务 URL |
@@ -293,20 +296,14 @@ SSO 用户最终获得的仍是 Cloud Mail Plus 原生 JWT，并继续使用现�
 
 无论是否启用联动退出，界面都会先调用 Cloud Mail Plus `/api/logout` 撤销当前 KV 会话并删除浏览器本地 Token。
 
-当前 Authelia Discovery 未公布标准 `end_session_endpoint`。因此默认：
-
-```toml
-authelia_logout_enabled = "false"
-```
-
-如你的 Authelia 部署已确认可使用某个 Logout URL，可显式配置完整地址。例如下例仅是常见形式，必须先按你的 Authelia 版本验证：
+当前 Authelia Discovery 未公布标准 `end_session_endpoint`，Authelia 也尚未实现 OIDC RP-Initiated Logout。本 fork 使用 Authelia 门户的 `/logout` 清除其浏览器会话，并通过受信任的 `rd` 参数返回邮箱登录页：
 
 ```toml
 authelia_logout_enabled = "true"
-authelia_logout_url = "https://auth.longlivehome.eu.org/logout?rd=https%3A%2F%2Fmail.example.com%2Flogin"
+authelia_logout_url = "https://auth.longlivehome.eu.org/logout?rd=https%3A%2F%2Fmail.longlivehome.eu.org%2Flogin"
 ```
 
-Worker 只接受 HTTPS Logout URL，不接受浏览器传入任意跳转地址。
+退出顺序是：撤销当前 Cloud Mail Plus KV/JWT 会话、删除浏览器本地 Token、访问固定的 Authelia Logout URL、清除 Authelia Session Cookie、回到 `/login`。Worker 只接受部署时配置的 HTTPS Logout URL，不接受浏览器传入任意跳转地址。
 
 ## 8. 验证清单
 
