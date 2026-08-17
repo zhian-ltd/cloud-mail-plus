@@ -24,6 +24,32 @@ import account from "../entity/account";
 import { att } from '../entity/att';
 import telegramService from './telegram-service';
 
+export function buildDraftRow(fields) {
+	const toEmail = String(fields.toEmail || '').trim();
+	const toName = String(fields.toName || '').trim();
+	return {
+		userId: fields.userId,
+		accountId: fields.accountId || 0,
+		sendEmail: fields.sendEmail || '',
+		name: fields.name || '',
+		toEmail,
+		toName,
+		recipient: JSON.stringify(toEmail ? [{ address: toEmail, name: toName }] : []),
+		cc: '[]',
+		bcc: '[]',
+		subject: fields.subject || '',
+		content: fields.content || '',
+		text: fields.text || '',
+		inReplyTo: fields.inReplyTo || '',
+		relation: fields.relation || '',
+		messageId: fields.messageId || '',
+		type: emailConst.type.SEND,
+		status: emailConst.status.SAVING,
+		aiMetadata: fields.aiMetadata || '',
+		isDel: isDel.NORMAL,
+	};
+}
+
 const emailService = {
 
 	async list(c, params, userId) {
@@ -854,22 +880,7 @@ const emailService = {
 	},
 
 	async saveDraft(c, fields) {
-		const row = {
-			userId: fields.userId,
-			accountId: fields.accountId || 0,
-			sendEmail: '',
-			toEmail: fields.toEmail || '',
-			subject: fields.subject || '',
-			content: fields.content || '',
-			text: fields.text || '',
-			inReplyTo: fields.inReplyTo || '',
-			relation: fields.relation || '',
-			messageId: fields.messageId || '',
-			type: emailConst.type.SEND,
-			status: emailConst.status.SAVING,
-			aiMetadata: fields.aiMetadata || '',
-			isDel: isDel.NORMAL,
-		};
+		const row = buildDraftRow(fields);
 		const [inserted] = await orm(c).insert(email).values(row).returning({ emailId: email.emailId });
 		return inserted.emailId;
 	},
