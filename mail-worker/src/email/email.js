@@ -12,17 +12,7 @@ import userService from '../service/user-service';
 import telegramService from '../service/telegram-service';
 import userPushSettingService from '../service/user-push-setting-service';
 import { resolvePushScopes } from '../service/push-routing-service';
-
-async function forwardMessage(message, forwardEmail, scope) {
-	const emails = String(forwardEmail || '').split(',').map(item => item.trim()).filter(Boolean);
-	await Promise.all(emails.map(async email => {
-		try {
-			await message.forward(email);
-		} catch (e) {
-			console.error(`${scope}转发邮箱 ${email} 失败：`, e);
-		}
-	}));
-}
+import { forwardIncomingEmail } from '../service/mail-forward-service';
 
 export async function email(message, env, ctx) {
 
@@ -36,6 +26,8 @@ export async function email(message, env, ctx) {
 			forwardEmail,
 			ruleEmail,
 			ruleType,
+			resendTokens,
+			emailProvider,
 			r2Domain,
 			noRecipient
 		} = await settingService.query({ env });
@@ -175,15 +167,24 @@ export async function email(message, env, ctx) {
 			message.to,
 			account?.email || message.to,
 		);
+		const forwardContext = {
+			message,
+			parsedEmail: email,
+			attachments,
+			sourceEmail: account?.email || message.to,
+			emailProvider,
+			resendTokens,
+		};
 
 		// 全域 Telegram 推送：继续使用系统设置，作用于所有收件邮件。
 		if (pushScopes.global && tgBotStatus === settingConst.tgBotStatus.OPEN && tgChatId) {
 			await telegramService.sendEmailToBot({ env }, emailRow)
 		}
 
-		// 全域第三方邮箱推送保持原有行为。
+		// 全域和个人第三方邮箱转发均遵循系统邮件发送方式：CF 优先、
+		// 仅 Resend 或仅 CF。两类规则与目标仍然彼此独立。
 		if (pushScopes.global && forwardStatus === settingConst.forwardStatus.OPEN && forwardEmail) {
-			await forwardMessage(message, forwardEmail, '全域');
+			await forwardIncomingEmail({ ...forwardContext, forwardEmail, scope: '全域' });
 		}
 
 		// 个人推送只会加载当前收件邮箱所属 user_id 的配置。
@@ -194,7 +195,11 @@ export async function email(message, env, ctx) {
 			}
 			if (personalSetting.forwardStatus === settingConst.forwardStatus.OPEN
 				&& personalSetting.forwardEmail) {
-				await forwardMessage(message, personalSetting.forwardEmail, '个人');
+				await forwardIncomingEmail({
+					...forwardContext,
+					forwardEmail: personalSetting.forwardEmail,
+					scope: '个人',
+				});
 			}
 		}
 

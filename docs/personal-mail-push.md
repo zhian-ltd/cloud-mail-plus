@@ -15,7 +15,15 @@
 - 一个或多个第三方转发邮箱；
 - “全部转发”或仅推送指定自有邮箱。
 
-Telegram Bot Token 只保存在 Worker 后端的 D1 数据库中。查询个人设置时，前端只能看到“是否已配置”，不能读回 Token。第三方转发邮箱必须先在 Cloudflare Email Routing 中验证。
+Telegram Bot Token 只保存在 Worker 后端的 D1 数据库中。查询个人设置时，前端只能看到“是否已配置”，不能读回 Token。
+
+第三方邮箱转发遵循管理员在“系统设置 → 邮件发送方式”中的选择：
+
+- **仅 Resend**：使用收件地址所属域名配置的 Resend Token，目标地址无需在 Cloudflare Email Routing 中验证；
+- **CF 优先**：先使用 Cloudflare 原生转发，目标未验证等原因导致失败时自动回退 Resend；
+- **仅 CF**：只使用 Cloudflare 原生转发，目标地址仍必须先在 Cloudflare 中验证。
+
+通过 Resend 转发时，邮件从本地收件地址发出，原始发件人写入 `Reply-To`，并保留正文和附件。因此回复转发邮件时仍会回复给原始发件人，同时不会伪造外部发件人域名。
 
 ## 用户与邮件隔离
 
@@ -42,7 +50,7 @@ CREATE TABLE IF NOT EXISTS user_push_setting (...);
 ## 验证建议
 
 1. 用普通用户登录，确认“个人设置”中出现“个人邮件推送”。
-2. 配置该用户自己的 Telegram Bot/Chat ID 或已验证的转发邮箱并启用。
+2. 配置该用户自己的 Telegram Bot/Chat ID 或转发邮箱并启用；若系统使用“仅 CF”，转发目标必须先在 Cloudflare 验证。
 3. 向该用户邮箱发送测试邮件，确认个人目标收到通知。
 4. 向另一个用户邮箱发送测试邮件，确认第一个用户的个人目标没有收到通知。
 5. 启用管理员全域推送，再次测试，确认全域目标与邮件所属用户的个人目标均能收到通知。
