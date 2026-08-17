@@ -39,7 +39,22 @@ const transport = new DefaultChatTransport({
 });
 
 // Chat is a class. shallowRef tracks identity; the class manages internal reactivity.
-const chat = shallowRef(new Chat({ transport, messages: store.messages || [] }));
+function createChat(messages = []) {
+  return new Chat({
+    transport,
+    messages,
+    onFinish: ({ message }) => {
+      void syncAgentDrafts([message]).then(async () => {
+        await nextTick();
+        if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
+      }).catch(error => {
+        console.warn('[draft] unable to synchronize completed AI draft', error);
+      });
+    },
+  });
+}
+
+const chat = shallowRef(createChat(store.messages || []));
 
 const syncingDraftIds = new Set();
 
@@ -102,10 +117,9 @@ async function removeLocalAgentDraft(serverDraftId) {
   draftStore.refreshList++;
 }
 
-watch(() => chat.value.messages, async (messages) => {
+watch(() => chat.value.messages, async () => {
   await nextTick();
   if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
-  await syncAgentDrafts(messages);
 }, { deep: true });
 
 onMounted(async () => {
@@ -145,7 +159,7 @@ async function onConfirmTool({ accepted, toolCallId, toolName, args }) {
 
 async function clearChat() {
   await store.clear();
-  chat.value = new Chat({ transport, messages: [] });
+  chat.value = createChat();
 }
 
 function renderPart(part) {
