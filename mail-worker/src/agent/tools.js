@@ -1,4 +1,4 @@
-import { tool } from 'ai';
+import { generateText, tool } from 'ai';
 import { z } from 'zod';
 import { eq, and, like, gte, lte, desc } from 'drizzle-orm';
 import emailService from '../service/email-service';
@@ -10,7 +10,7 @@ import { isDel, emailConst } from '../const/entity-const';
 
 // Tool factory — binds env + userId so each user only sees their own data.
 // `c` mirrors the Hono context shape that the rest of the codebase uses: `{ env }`.
-export function buildTools({ env, userId, userEmail }) {
+export function buildTools({ env, userId, userEmail, aiModel, aiModelId }) {
   const c = { env };
 
   return {
@@ -112,13 +112,14 @@ export function buildTools({ env, userId, userEmail }) {
         const detail = await emailService.detail(c, emailId, userId);
         if (!detail) return { error: 'Not found' };
         const body = (detail.text || detail.content || '').slice(0, 6000);
-        const r = await env.AI.run('@cf/moonshotai/kimi-k2.5', {
+        const { text } = await generateText({
+          model: aiModel,
           messages: [
             { role: 'system', content: 'Summarize the email in 3-5 markdown bullets, then list action items under "Actions:".' },
             { role: 'user', content: `Subject: ${detail.subject}\nFrom: ${detail.sendEmail}\n\n${body}` },
           ],
         });
-        return { emailId, summary: r.response || r.result?.response || JSON.stringify(r) };
+        return { emailId, summary: text };
       },
     }),
 
@@ -132,13 +133,13 @@ export function buildTools({ env, userId, userEmail }) {
       execute: async ({ emailId, instructions, tone }) => {
         const original = await emailService.detail(c, emailId, userId);
         if (!original) return { error: 'Original email not found' };
-        const r = await env.AI.run('@cf/moonshotai/kimi-k2.5', {
+        const { text: html } = await generateText({
+          model: aiModel,
           messages: [
             { role: 'system', content: `Write a ${tone} email reply in clean HTML (no <html>/<body>, no markdown). Match the sender's language. Sign as ${userEmail.split('@')[0]}.` },
             { role: 'user', content: `Reply to:\nFrom: ${original.sendEmail}\nSubject: ${original.subject}\n\n${(original.text || original.content || '').slice(0, 4000)}\n\nInstructions: ${instructions}` },
           ],
         });
-        const html = r.response || r.result?.response || '';
         const draftId = await emailService.saveDraft(c, {
           userId,
           accountId: original.accountId,
@@ -148,7 +149,7 @@ export function buildTools({ env, userId, userEmail }) {
           relation: `${original.relation || ''} ${original.messageId || ''}`.trim(),
           content: html,
           text: html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-          aiMetadata: JSON.stringify({ source: 'tool', sourceEmailId: emailId, model: '@cf/moonshotai/kimi-k2.5' }),
+          aiMetadata: JSON.stringify({ source: 'tool', sourceEmailId: emailId, model: aiModelId }),
         });
         return { draftId, preview: html.slice(0, 400), to: original.sendEmail };
       },
@@ -162,17 +163,17 @@ export function buildTools({ env, userId, userEmail }) {
         instructions: z.string().min(1),
       }),
       execute: async ({ to, subject, instructions }) => {
-        const r = await env.AI.run('@cf/moonshotai/kimi-k2.5', {
+        const { text: html } = await generateText({
+          model: aiModel,
           messages: [
             { role: 'system', content: `Write an email body in clean HTML. Sign as ${userEmail.split('@')[0]}. No markdown.` },
             { role: 'user', content: `To: ${to}\nSubject: ${subject}\nInstructions: ${instructions}` },
           ],
         });
-        const html = r.response || r.result?.response || '';
         const draftId = await emailService.saveDraft(c, {
           userId, accountId: 0, toEmail: to, subject, content: html,
           text: html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-          aiMetadata: JSON.stringify({ source: 'tool-new', model: '@cf/moonshotai/kimi-k2.5' }),
+          aiMetadata: JSON.stringify({ source: 'tool-new', model: aiModelId }),
         });
         return { draftId, preview: html.slice(0, 400) };
       },

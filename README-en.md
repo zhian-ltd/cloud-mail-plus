@@ -121,9 +121,9 @@ Built-in Worker cron job exports the entire D1 database as gzipped SQL to R2 dai
 - Manual trigger: `POST /api/backup/<jwt_secret>`
 - List backups: `GET /api/backup/<jwt_secret>/list`
 
-### 8. AI Email Agent (Cloudflare Workers AI)
+### 8. AI Email Agent (configurable AI provider)
 
-A conversational email assistant powered by [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) (`@cf/moonshotai/kimi-k2.5`). After signing in, click the **✨ Email Agent** pill in the header to open the side panel and chat with the AI.
+A conversational email assistant supporting Cloudflare Workers AI and OpenAI-compatible APIs. The default model is `@cf/zai-org/glm-4.7-flash`, which is available on Workers Free. Administrators can switch the global provider and model—such as `gpt-5.6-terra`—under **System Settings → AI Settings**. After signing in, click the **✨ Email Agent** pill in the header to open the side panel.
 
 **9 email tools** (the model decides which to call):
 
@@ -148,11 +148,13 @@ A conversational email assistant powered by [Cloudflare Workers AI](https://deve
 - Auto-draft is even tighter (max 2 steps: read + draft)
 - The model can decide an email needs no reply (noreply / spam / automated notifications) and skip drafting
 
-**Configuration**: After login, go to **Settings** → scroll to the **✨ AI Email Agent** section → toggle "Enable AI agent" + (optional) "Auto-draft replies" + custom persona instructions.
+**Configuration**: An administrator first selects and tests the global provider under **System Settings → AI Settings**. Each user can then enable the agent, optional auto-drafts, and persona instructions under **Personal Settings → ✨ AI Email Agent**. The email agent, auto-drafts, and translation share the selected global model.
 
-**Model & cost**: Uses Cloudflare Workers AI Kimi K2.5. Free tier is 10,000 neurons/day; a single chat turn uses ~50–200 neurons, sufficient for normal use.
+**Model & cost**: The default `@cf/zai-org/glm-4.7-flash` is available on Workers Free. Since 2026-07-28, `@cf/moonshotai/kimi-k2.6` requires Workers Paid and returns internal error `5035` on Workers Free. OpenAI-compatible providers bill separately; `gpt-5.6-terra` supports Chat Completions and function calling but is not available on the OpenAI API Free tier.
 
-**Integration stack**: [AI SDK v6](https://sdk.vercel.ai/) + `@ai-sdk/vue` v3 (`Chat` class) + `workers-ai-provider` + Cloudflare Workers AI. Full bilingual i18n.
+**Integration stack**: [AI SDK v6](https://sdk.vercel.ai/) + `@ai-sdk/vue` v3 (`Chat` class) + `workers-ai-provider` / OpenAI-compatible Chat Completions. OpenAI-compatible API keys are AES-GCM encrypted with a key derived from the server-side `jwt_secret` and are never returned to the frontend.
+
+See [AI configuration](docs/ai-configuration.md) for provider, model, security, and verification details.
 
 ### 9. Authelia SSO (OIDC)
 
@@ -224,9 +226,9 @@ What the agent provides:
 - **Send + delete require confirmation** (a yellow card pops up at the bottom of the side panel — never auto-executed)
 - **Auto-draft replies on inbound email** (saved to Drafts — never sent automatically)
 - **Full bilingual i18n** (en / zh, follows the language toggle)
-- **Model**: `@cf/moonshotai/kimi-k2.5` (Cloudflare Workers AI — billed by neurons, free tier is 10,000 neurons/day)
+- **Default model**: `@cf/zai-org/glm-4.7-flash` (available on Workers Free); administrators may instead configure an OpenAI-compatible API
 
-> **Integration**: AI SDK v6 (`ai`) + `@ai-sdk/vue` v3 (`Chat` class) + `workers-ai-provider` + Cloudflare Workers AI. The Worker route calls `streamText()` directly and pipes SSE back (no Durable Object — avoids the WebSocket/HTTP protocol mismatch between AIChatAgent and the Vue Chat client).
+> **Integration**: AI SDK v6 (`ai`) + `@ai-sdk/vue` v3 (`Chat` class) + Cloudflare Workers AI / OpenAI-compatible Chat Completions. The Worker route calls `streamText()` directly and pipes SSE back (no Durable Object — avoids the WebSocket/HTTP protocol mismatch between AIChatAgent and the Vue Chat client).
 
 ### Known deployment notes
 

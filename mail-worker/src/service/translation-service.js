@@ -4,11 +4,12 @@ import { emailTranslation } from '../entity/email-translation';
 import { email } from '../entity/email';
 import BizError from '../error/biz-error';
 import {
-	MODEL_ID, SUPPORTED_TARGET_LANGS, LANG_NAMES, MAX_INPUT_CHARS, MAX_RETRY_ATTEMPTS,
+	SUPPORTED_TARGET_LANGS, LANG_NAMES, MAX_INPUT_CHARS, MAX_RETRY_ATTEMPTS,
 } from '../const/translation-const';
 import { htmlToPlainText, paragraphsToHtml } from '../utils/html-utils';
 import { robustJsonParse } from '../utils/robust-json';
 import { detectLang } from '../utils/lang-detect';
+import aiConfigService from './ai-config-service';
 
 const translationService = {
 	async translate(c, { emailId, targetLang, userId }) {
@@ -32,8 +33,6 @@ const translationService = {
 			};
 		}
 
-		if (!c.env.AI) throw new BizError('aiNotConfigured', 503);
-
 		const e = await orm(c).select().from(email)
 			.where(and(eq(email.emailId, emailId), eq(email.userId, userId)))
 			.get();
@@ -51,7 +50,7 @@ const translationService = {
 			truncated = true;
 		}
 
-		const aiResult = await callTranslationModel(c.env.AI, {
+		const aiResult = await callTranslationModel(c, {
 			subject: e.subject || '',
 			content: plainText,
 			targetLang,
@@ -64,7 +63,7 @@ const translationService = {
 			translatedSubject: aiResult.subject,
 			translatedContent: translatedContentHtml,
 			sourceLang: aiResult.sourceLang || null,
-			model: MODEL_ID,
+			model: aiResult.modelId,
 		}).onConflictDoNothing().run();
 
 		return {
@@ -77,7 +76,7 @@ const translationService = {
 	},
 };
 
-async function callTranslationModel(AI, { subject, content, targetLang, attempt = 1 }) {
+async function callTranslationModel(c, { subject, content, targetLang, attempt = 1 }) {
 	const langName = LANG_NAMES[targetLang];
 	const systemPrompt = `You are a professional email translator. ` +
 		`Translate the user's email subject and body to ${langName}. ` +
@@ -91,30 +90,31 @@ async function callTranslationModel(AI, { subject, content, targetLang, attempt 
 
 	const userPrompt = `Subject: ${subject}\n\nBody:\n${content}`;
 
-	let resp;
+	let generated;
 	try {
-		resp = await AI.run(MODEL_ID, {
+		generated = await aiConfigService.generate(c, {
 			messages: [
 				{ role: 'system', content: systemPrompt },
 				{ role: 'user', content: userPrompt },
 			],
-			max_tokens: 4096,
+			maxOutputTokens: 4096,
 			temperature: 0.2,
 		});
 	} catch (e) {
-		if (e?.status === 429 || /rate limit/i.test(e?.message || '')) throw new BizError('aiRateLimited', 429);
+		if (e?.name === 'BizError') throw e;
+		if (e?.status === 429 || e?.statusCode === 429 || /rate limit/i.test(e?.message || '')) throw new BizError('aiRateLimited', 429);
 		if (/timeout/i.test(e?.message || '')) throw new BizError('aiTimeout', 504);
 		throw new BizError('aiBadOutput', 502);
 	}
 
-	const parsed = robustJsonParse(resp.response);
+	const parsed = robustJsonParse(generated.text);
 	if (!parsed || typeof parsed.subject !== 'string' || typeof parsed.body !== 'string') {
 		if (attempt < MAX_RETRY_ATTEMPTS) {
-			return callTranslationModel(AI, { subject, content, targetLang, attempt: attempt + 1 });
+			return callTranslationModel(c, { subject, content, targetLang, attempt: attempt + 1 });
 		}
 		throw new BizError('aiBadOutput', 502);
 	}
-	return parsed;
+	return { ...parsed, modelId: generated.modelId };
 }
 
 export default translationService;

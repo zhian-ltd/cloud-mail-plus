@@ -84,10 +84,14 @@ const settingService = {
 
 	async get(c, showSiteKey = false) {
 
-		const [settingRow, recordList] = await Promise.all([
-			await this.query(c),
+		const [settingData, recordList] = await Promise.all([
+			this.query(c),
 			verifyRecordService.selectListByIP(c)
 		]);
+		const settingRow = {
+			...settingData,
+			resendTokens: { ...settingData.resendTokens },
+		};
 
 
 		if (!showSiteKey) {
@@ -120,24 +124,40 @@ const settingService = {
 		settingRow.addVerifyOpen = addVerifyOpen
 
 		settingRow.storageType = await r2Service.storageType(c);
-		settingRow.aiEnabled = !!c.env.AI;
+		settingRow.aiApiKeyConfigured = Boolean(settingRow.aiApiKeyEncrypted);
+		delete settingRow.aiApiKeyEncrypted;
+		settingRow.workersAiAvailable = Boolean(c.env.AI);
+		settingRow.aiRequiresPaidPlan = settingRow.aiProvider === 'workers-ai' && [
+			'@cf/moonshotai/kimi-k2.6',
+			'@cf/moonshotai/kimi-k2.7-code',
+			'@cf/zai-org/glm-5.2',
+		].includes(settingRow.aiModel);
+		settingRow.aiReady = settingRow.aiProvider === 'workers-ai'
+			? settingRow.workersAiAvailable
+			: settingRow.aiApiKeyConfigured;
+		settingRow.aiEnabled = settingRow.aiReady;
 
 		return settingRow;
 	},
 
 	async set(c, params) {
 		const settingData = await this.query(c);
-		let resendTokens = { ...settingData.resendTokens, ...params.resendTokens };
+		const safeParams = { ...params };
+		[
+			'aiProvider', 'aiModel', 'aiBaseUrl', 'aiApiKey', 'aiApiKeyEncrypted',
+			'aiApiKeyConfigured', 'workersAiAvailable', 'aiRequiresPaidPlan', 'aiReady', 'aiEnabled',
+		].forEach(key => delete safeParams[key]);
+		let resendTokens = { ...settingData.resendTokens, ...safeParams.resendTokens };
 		Object.keys(resendTokens).forEach(domain => {
 			if (!resendTokens[domain]) delete resendTokens[domain];
 		});
 
-		if (Array.isArray(params.emailPrefixFilter)) {
-			params.emailPrefixFilter = params.emailPrefixFilter + '';
+		if (Array.isArray(safeParams.emailPrefixFilter)) {
+			safeParams.emailPrefixFilter = safeParams.emailPrefixFilter + '';
 		}
 
-		params.resendTokens = JSON.stringify(resendTokens);
-		await orm(c).update(setting).set({ ...params }).returning().get();
+		safeParams.resendTokens = JSON.stringify(resendTokens);
+		await orm(c).update(setting).set(safeParams).returning().get();
 		await this.refresh(c);
 	},
 
@@ -228,7 +248,8 @@ const settingService = {
 			autheliaLoginUrl: authelia.loginUrl,
 			autheliaLogoutEnabled: authelia.logoutEnabled,
 			minEmailPrefix: settingRow.minEmailPrefix,
-			projectLink: settingRow.projectLink
+			projectLink: settingRow.projectLink,
+			aiEnabled: settingRow.aiEnabled,
 		};
 	}
 };

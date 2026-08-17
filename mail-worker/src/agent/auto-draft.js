@@ -2,12 +2,15 @@
 // Looks up the recipient user, checks if AI auto-draft is enabled, and
 // dispatches to the per-user EmailAgent Durable Object.
 import userService from '../service/user-service';
+import aiConfigService from '../service/ai-config-service';
 
 export async function maybeAutoDraft(c, { emailId, userId }) {
-  if (!c.env.EMAIL_AGENT || !c.env.AI) return;  // bindings not configured
+  if (!c.env.EMAIL_AGENT) return;
   try {
     const user = await userService.findById(c, userId);
     if (!user || !user.agentEnabled || !user.agentAutoDraft) return;
+    const aiConfig = await aiConfigService.publicConfig(c);
+    if (!aiConfig.aiReady) return;
 
     const stub = c.env.EMAIL_AGENT.get(c.env.EMAIL_AGENT.idFromName(`user-${userId}`));
 

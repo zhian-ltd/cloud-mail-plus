@@ -2,9 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createTestDb } from '../helpers/test-db';
 
 let testDb;
+const { mockGenerate } = vi.hoisted(() => ({ mockGenerate: vi.fn() }));
 
 vi.mock('../../src/entity/orm', () => ({
 	default: () => testDb.db,
+}));
+
+vi.mock('../../src/service/ai-config-service', () => ({
+	default: { generate: mockGenerate },
 }));
 
 const { default: translationService } = await import('../../src/service/translation-service');
@@ -17,6 +22,7 @@ function mkCtx(overrides = {}) {
 
 beforeEach(() => {
 	testDb = createTestDb();
+	mockGenerate.mockReset();
 });
 
 describe('translationService.translate — cache hit', () => {
@@ -31,11 +37,7 @@ describe('translationService.translate — cache hit', () => {
 			sourceLang: 'en', model: 'test-model',
 		}).run();
 
-		const ctxWithMockAI = mkCtx({
-			AI: { run: () => { throw new Error('AI should not be called on cache hit'); } },
-		});
-
-		const result = await translationService.translate(ctxWithMockAI, {
+		const result = await translationService.translate(mkCtx(), {
 			emailId: 1001, targetLang: 'zh', userId: 42,
 		});
 		expect(result.fromCache).toBe(true);
@@ -53,20 +55,18 @@ describe('translationService.translate — cache miss', () => {
 			text: 'Revenue up 12%. Headcount unchanged.', toEmail: 'x@y.z', toName: 'X', accountId: 1,
 		}).run();
 
-		const mockAI = {
-			run: async (model, payload) => {
-				expect(model).toBe('@cf/meta/llama-3.1-8b-instruct-fast');
-				expect(payload.messages[1].content).toContain('Revenue up 12%');
-				return {
-					response: JSON.stringify({
-						sourceLang: 'en',
-						subject: '季度更新',
-						body: '收入增长 12%。员工人数不变。',
-					}),
-				};
-			},
-		};
-		const ctxAI = mkCtx({ AI: mockAI });
+		mockGenerate.mockImplementation(async (_c, payload) => {
+			expect(payload.messages[1].content).toContain('Revenue up 12%');
+			return {
+				text: JSON.stringify({
+					sourceLang: 'en',
+					subject: '季度更新',
+					body: '收入增长 12%。员工人数不变。',
+				}),
+				modelId: '@cf/zai-org/glm-4.7-flash',
+			};
+		});
+		const ctxAI = mkCtx();
 
 		const result = await translationService.translate(ctxAI, {
 			emailId: 2001, targetLang: 'zh', userId: 7,
@@ -79,6 +79,7 @@ describe('translationService.translate — cache miss', () => {
 		const row = testDb.db.select().from(emailTranslation).get();
 		expect(row.emailId).toBe(2001);
 		expect(row.translatedSubject).toBe('季度更新');
+		expect(row.model).toBe('@cf/zai-org/glm-4.7-flash');
 	});
 });
 
@@ -91,11 +92,7 @@ describe('translationService.translate — same language', () => {
 			toEmail: 'a@b.c', toName: 'A', accountId: 1,
 		}).run();
 
-		const ctxAI = mkCtx({
-			AI: { run: () => { throw new Error('AI should not be called'); } },
-		});
-
-		const result = await translationService.translate(ctxAI, {
+		const result = await translationService.translate(mkCtx(), {
 			emailId: 3001, targetLang: 'en', userId: 9,
 		});
 		expect(result.alreadyInTargetLang).toBe(true);
@@ -118,15 +115,16 @@ describe('translationService.translate — error paths', () => {
 			emailId: 4001, userId: 1, subject: 'S', content: 'Some German text would go here.',
 			text: 'Some German text would go here.', toEmail: 'a@b.c', toName: 'A', accountId: 1,
 		}).run();
+		const error = Object.assign(new Error('aiNotConfigured'), { name: 'BizError', code: 503 });
+		mockGenerate.mockRejectedValue(error);
 		await expect(
 			translationService.translate(mkCtx(), { emailId: 4001, targetLang: 'zh', userId: 1 })
 		).rejects.toMatchObject({ message: 'aiNotConfigured', code: 503 });
 	});
 
 	it('throws emailNotFound for missing emailId', async () => {
-		const ctxAI = mkCtx({ AI: { run: () => ({ response: '{}' }) } });
 		await expect(
-			translationService.translate(ctxAI, { emailId: 99999, targetLang: 'zh', userId: 1 })
+			translationService.translate(mkCtx(), { emailId: 99999, targetLang: 'zh', userId: 1 })
 		).rejects.toMatchObject({ message: 'emailNotFound', code: 404 });
 	});
 
@@ -135,9 +133,8 @@ describe('translationService.translate — error paths', () => {
 			emailId: 5001, userId: 100, subject: 'X', content: 'foo', text: 'foo',
 			toEmail: 'a@b.c', toName: 'A', accountId: 1,
 		}).run();
-		const ctxAI = mkCtx({ AI: { run: () => ({ response: '{}' }) } });
 		await expect(
-			translationService.translate(ctxAI, { emailId: 5001, targetLang: 'zh', userId: 200 })
+			translationService.translate(mkCtx(), { emailId: 5001, targetLang: 'zh', userId: 200 })
 		).rejects.toMatchObject({ message: 'emailNotFound', code: 404 });
 	});
 
@@ -149,14 +146,11 @@ describe('translationService.translate — error paths', () => {
 			toEmail: 'a@b.c', toName: 'A', accountId: 1,
 		}).run();
 
-		let calls = 0;
-		const ctxAI = mkCtx({
-			AI: { run: () => { calls++; return { response: 'totally not json' }; } },
-		});
+		mockGenerate.mockResolvedValue({ text: 'totally not json', modelId: 'test-model' });
 		await expect(
-			translationService.translate(ctxAI, { emailId: 6001, targetLang: 'zh', userId: 1 })
+			translationService.translate(mkCtx(), { emailId: 6001, targetLang: 'zh', userId: 1 })
 		).rejects.toMatchObject({ message: 'aiBadOutput', code: 502 });
-		expect(calls).toBe(2);
+		expect(mockGenerate).toHaveBeenCalledTimes(2);
 	});
 });
 
@@ -169,13 +163,14 @@ describe('translationService.translate — truncation', () => {
 		}).run();
 
 		let receivedBody;
-		const mockAI = {
-			run: async (_model, payload) => {
-				receivedBody = payload.messages[1].content;
-				return { response: JSON.stringify({ sourceLang: 'de', subject: 'Long', body: 'OK' }) };
-			},
-		};
-		const ctxAI = mkCtx({ AI: mockAI });
+		mockGenerate.mockImplementation(async (_c, payload) => {
+			receivedBody = payload.messages[1].content;
+			return {
+				text: JSON.stringify({ sourceLang: 'de', subject: 'Long', body: 'OK' }),
+				modelId: 'test-model',
+			};
+		});
+		const ctxAI = mkCtx();
 
 		const result = await translationService.translate(ctxAI, {
 			emailId: 7001, targetLang: 'zh', userId: 1,

@@ -11,7 +11,7 @@ const local = ref({ agentEnabled: false, agentAutoDraft: false, agentPersona: ''
 const saving = ref(false);
 
 onMounted(async () => {
-  if (!store.hydrated) await store.hydrate();
+  await store.hydrate();
   local.value = { ...store.settings };
 });
 
@@ -31,7 +31,13 @@ async function save() {
 <template>
   <div class="agent-settings">
     <h2>✨ {{ $t('aiAgent') }}</h2>
-    <p class="hint">{{ $t('aiAgentPoweredBy') }} <code>@cf/moonshotai/kimi-k2.5</code></p>
+    <p class="hint">
+      {{ $t('aiAgentPoweredBy') }}
+      <code>{{ store.settings.aiModel || $t('aiNotConfigured') }}</code>
+      <el-tag size="small" :type="store.settings.aiReady ? 'success' : 'danger'">
+        {{ store.settings.aiReady ? $t('aiReady') : $t('aiNotConfigured') }}
+      </el-tag>
+    </p>
 
     <el-form label-position="top" style="max-width: 600px;">
       <el-form-item :label="$t('aiAgentEnable')">
@@ -65,7 +71,7 @@ async function save() {
 
 <style scoped>
 .agent-settings { padding: 20px; }
-.hint { color: #6b7280; font-size: 13px; }
+.hint { color: #6b7280; font-size: 13px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .muted { color: #6b7280; font-size: 12px; margin-top: 4px; }
 code { background: #f3f4f6; padding: 1px 6px; border-radius: 3px; font-size: 12px; }
 </style>

@@ -260,6 +260,32 @@
             </div>
           </div>
 
+          <!-- AI Settings Card -->
+          <div class="settings-card">
+            <div class="card-title">{{ $t('aiSetting') }}</div>
+            <div class="card-content">
+              <div class="setting-item">
+                <div><span>{{ $t('aiProvider') }}</span></div>
+                <div class="forward">
+                  <span>{{ setting.aiProvider === 'openai-compatible' ? $t('openAiCompatible') : $t('workersAi') }}</span>
+                  <el-button class="opt-button" size="small" type="primary" @click="openAiSetting">
+                    <Icon icon="fluent:settings-48-regular" width="18" height="18"/>
+                  </el-button>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div><span>{{ $t('aiModel') }}</span></div>
+                <div class="ai-model-summary" :title="setting.aiModel">{{ setting.aiModel }}</div>
+              </div>
+              <div class="setting-item">
+                <div><span>{{ $t('status') }}</span></div>
+                <el-tag :type="setting.aiReady ? 'success' : 'danger'">
+                  {{ setting.aiReady ? $t('aiReady') : $t('aiNotConfigured') }}
+                </el-tag>
+              </div>
+            </div>
+          </div>
+
           <div class="settings-card">
             <div class="card-title">{{ $t('emailPush') }}</div>
             <div class="card-content">
@@ -746,13 +772,64 @@
         </div>
         <el-button type="primary" style="width: 100%;" :loading="settingLoading" @click="saveEmailPrefix">{{ $t('save') }}</el-button>
       </el-dialog>
+      <el-dialog class="ai-setting-dialog" v-model="aiSettingShow" :title="t('aiSetting')" @closed="resetAiForm">
+        <el-form label-position="top">
+          <el-form-item :label="t('aiProvider')">
+            <el-radio-group v-model="aiForm.aiProvider" @change="aiProviderChanged">
+              <el-radio-button value="workers-ai">{{ t('workersAi') }}</el-radio-button>
+              <el-radio-button value="openai-compatible">{{ t('openAiCompatible') }}</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-alert
+              v-if="aiForm.aiProvider === 'workers-ai' && !setting.workersAiAvailable"
+              type="error" :closable="false" show-icon :title="t('workersAiBindingMissing')"/>
+          <el-alert
+              v-else-if="aiForm.aiProvider === 'workers-ai' && paidWorkersAiModels.includes(aiForm.aiModel)"
+              type="warning" :closable="false" show-icon :title="t('workersAiPaidWarning')"/>
+
+          <el-form-item :label="t('aiModel')">
+            <el-select
+                v-if="aiForm.aiProvider === 'workers-ai'"
+                v-model="aiForm.aiModel" filterable allow-create default-first-option style="width: 100%">
+              <el-option
+                  v-for="item in workersAiModelOptions"
+                  :key="item.value" :value="item.value" :label="item.label"/>
+            </el-select>
+            <el-input v-else v-model="aiForm.aiModel" placeholder="gpt-5.6-terra"/>
+          </el-form-item>
+
+          <template v-if="aiForm.aiProvider === 'openai-compatible'">
+            <el-form-item :label="t('aiBaseUrl')">
+              <el-input v-model="aiForm.aiBaseUrl" placeholder="https://api.openai.com/v1"/>
+            </el-form-item>
+            <el-form-item :label="t('aiApiKey')">
+              <el-input
+                  v-model="aiForm.aiApiKey" type="password" show-password autocomplete="new-password"
+                  :placeholder="setting.aiApiKeyConfigured ? t('aiApiKeySavedPlaceholder') : 'sk-…'"/>
+              <div class="ai-secret-note">{{ t('aiApiKeySecurityNote') }}</div>
+            </el-form-item>
+            <el-checkbox v-if="setting.aiApiKeyConfigured" v-model="aiForm.clearAiApiKey">
+              {{ t('aiClearApiKey') }}
+            </el-checkbox>
+          </template>
+
+          <el-alert class="ai-scope-note" type="info" :closable="false" show-icon :title="t('aiScopeNote')"/>
+        </el-form>
+        <template #footer>
+          <div class="dialog-footer">
+            <el-button :loading="aiTesting" :disabled="aiSaving" @click="testAiSetting">{{ t('aiTest') }}</el-button>
+            <el-button type="primary" :loading="aiSaving" :disabled="aiTesting" @click="saveAiSetting">{{ t('save') }}</el-button>
+          </div>
+        </template>
+      </el-dialog>
     </el-scrollbar>
   </div>
 </template>
 
 <script setup>
 import {computed, defineOptions, reactive, ref} from "vue";
-import {deleteBackground, setBackground, settingQuery, settingSet} from "@/request/setting.js";
+import {deleteBackground, setBackground, settingAiSave, settingAiTest, settingQuery, settingSet} from "@/request/setting.js";
 import {useSettingStore} from "@/store/setting.js";
 import {useUiStore} from "@/store/ui.js";
 import {useUserStore} from "@/store/user.js";
@@ -790,12 +867,15 @@ const noticePopupShow = ref(false)
 const thirdEmailShow = ref(false)
 const forwardRulesShow = ref(false)
 const emailPrefixShow = ref(false)
+const aiSettingShow = ref(false)
 const showResendList = ref(false)
 const settingStore = useSettingStore();
 const uiStore = useUiStore();
 const {settings: setting} = storeToRefs(settingStore);
 const editTitle = ref('')
 const settingLoading = ref(false)
+const aiSaving = ref(false)
+const aiTesting = ref(false)
 const clearS3Loading = ref(false)
 const r2DomainInput = ref('')
 const loginOpacity = ref(0)
@@ -818,6 +898,27 @@ const turnstileForm = reactive({
   siteKey: '',
   secretKey: ''
 })
+
+const aiForm = reactive({
+  aiProvider: 'workers-ai',
+  aiModel: '@cf/zai-org/glm-4.7-flash',
+  aiBaseUrl: 'https://api.openai.com/v1',
+  aiApiKey: '',
+  clearAiApiKey: false,
+})
+
+const paidWorkersAiModels = [
+  '@cf/moonshotai/kimi-k2.6',
+  '@cf/moonshotai/kimi-k2.7-code',
+  '@cf/zai-org/glm-5.2',
+]
+
+const workersAiModelOptions = computed(() => [
+  {value: '@cf/zai-org/glm-4.7-flash', label: `@cf/zai-org/glm-4.7-flash · ${t('freePlan')}`},
+  {value: '@cf/google/gemma-4-26b-a4b-it', label: `@cf/google/gemma-4-26b-a4b-it · ${t('freePlan')}`},
+  {value: '@cf/nvidia/nemotron-3-120b-a12b', label: `@cf/nvidia/nemotron-3-120b-a12b · ${t('freePlan')}`},
+  {value: '@cf/moonshotai/kimi-k2.6', label: `@cf/moonshotai/kimi-k2.6 · ${t('paidPlan')}`},
+])
 
 const s3 = reactive({
   bucket: '',
@@ -893,6 +994,63 @@ function getSettings() {
     resetAddS3Form()
     resetEmailPrefix()
   })
+}
+
+function resetAiForm() {
+  aiForm.aiProvider = setting.value.aiProvider || 'workers-ai'
+  aiForm.aiModel = setting.value.aiModel || '@cf/zai-org/glm-4.7-flash'
+  aiForm.aiBaseUrl = setting.value.aiBaseUrl || 'https://api.openai.com/v1'
+  aiForm.aiApiKey = ''
+  aiForm.clearAiApiKey = false
+}
+
+function openAiSetting() {
+  resetAiForm()
+  aiSettingShow.value = true
+}
+
+function aiProviderChanged(provider) {
+  if (provider === 'workers-ai' && !aiForm.aiModel.startsWith('@cf/')) {
+    aiForm.aiModel = '@cf/zai-org/glm-4.7-flash'
+  }
+  if (provider === 'openai-compatible' && aiForm.aiModel.startsWith('@cf/')) {
+    aiForm.aiModel = 'gpt-5.6-terra'
+  }
+}
+
+function aiPayload() {
+  return {
+    aiProvider: aiForm.aiProvider,
+    aiModel: aiForm.aiModel.trim(),
+    aiBaseUrl: aiForm.aiBaseUrl.trim(),
+    aiApiKey: aiForm.aiApiKey,
+    clearAiApiKey: aiForm.clearAiApiKey,
+  }
+}
+
+async function testAiSetting() {
+  if (aiTesting.value) return
+  aiTesting.value = true
+  try {
+    const tested = await settingAiTest(aiPayload())
+    ElMessage.success(`${t('aiTestSuccess')} ${tested.model}: ${tested.response || 'OK'}`)
+  } finally {
+    aiTesting.value = false
+  }
+}
+
+async function saveAiSetting() {
+  if (aiSaving.value) return
+  aiSaving.value = true
+  try {
+    const saved = await settingAiSave(aiPayload())
+    setting.value = {...setting.value, ...saved, aiEnabled: saved.aiReady}
+    aiForm.aiApiKey = ''
+    aiSettingShow.value = false
+    ElMessage.success(t('saveSuccessMsg'))
+  } finally {
+    aiSaving.value = false
+  }
 }
 
 
@@ -1304,6 +1462,14 @@ function change(e) {
   delete settingForm.s3AccessKey
   delete settingForm.s3SecretKey
   delete settingForm.resendTokens
+  delete settingForm.aiProvider
+  delete settingForm.aiModel
+  delete settingForm.aiBaseUrl
+  delete settingForm.aiApiKeyConfigured
+  delete settingForm.aiRequiresPaidPlan
+  delete settingForm.workersAiAvailable
+  delete settingForm.aiReady
+  delete settingForm.aiEnabled
   editSetting(settingForm, false)
 }
 
@@ -1481,6 +1647,28 @@ function editSetting(settingForm, refreshStatus = true) {
     justify-items: flex-end;
     font-weight: normal;
   }
+}
+
+.ai-model-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-secret-note {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+.ai-scope-note {
+  margin-top: 16px;
+}
+
+:deep(.el-dialog.ai-setting-dialog) {
+  width: min(560px, calc(100vw - 40px)) !important;
 }
 
 .r2domain-item {

@@ -33,8 +33,25 @@ const dbInit = {
 		await this.v3_2DB(c);
 		await this.v3_3DB(c);
 		await this.v3_4DB(c);
+		await this.v3_5DB(c);
 		await settingService.refresh(c);
 		return c.text('success');
+	},
+
+	async v3_5DB(c) {
+		const { results = [] } = await c.env.db.prepare(`PRAGMA table_info('setting')`).all();
+		const existing = new Set(results.map(column => column.name));
+		const columns = {
+			ai_provider: `TEXT NOT NULL DEFAULT 'workers-ai'`,
+			ai_model: `TEXT NOT NULL DEFAULT '@cf/zai-org/glm-4.7-flash'`,
+			ai_base_url: `TEXT NOT NULL DEFAULT 'https://api.openai.com/v1'`,
+			ai_api_key_encrypted: `TEXT NOT NULL DEFAULT ''`,
+		};
+		for (const [name, definition] of Object.entries(columns)) {
+			if (!existing.has(name)) {
+				await c.env.db.prepare(`ALTER TABLE setting ADD COLUMN ${name} ${definition};`).run();
+			}
+		}
 	},
 
 	async v3_4DB(c) {

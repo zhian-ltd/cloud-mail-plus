@@ -12,6 +12,14 @@ export function websiteConfig() {
     return http.get('/setting/websiteConfig')
 }
 
+export function settingAiSave(config) {
+    return http.put('/setting/ai', config)
+}
+
+export function settingAiTest(config) {
+    return http.post('/setting/ai/test', config)
+}
+
 export function setBackground(background) {
     return http.put('/setting/setBackground',{background})
 }

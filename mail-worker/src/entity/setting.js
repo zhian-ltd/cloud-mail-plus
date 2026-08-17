@@ -48,6 +48,10 @@ export const setting = sqliteTable('setting', {
 	minEmailPrefix: integer('min_email_prefix').default(0).notNull(),
 	emailPrefixFilter: text('email_prefix_filter').default('').notNull(),
 	emailProvider: text('email_provider').default('cf-first').notNull(),
-	externalApiKey: text('external_api_key').default('').notNull()
+	externalApiKey: text('external_api_key').default('').notNull(),
+	aiProvider: text('ai_provider').default('workers-ai').notNull(),
+	aiModel: text('ai_model').default('@cf/zai-org/glm-4.7-flash').notNull(),
+	aiBaseUrl: text('ai_base_url').default('https://api.openai.com/v1').notNull(),
+	aiApiKeyEncrypted: text('ai_api_key_encrypted').default('').notNull()
 });
 export default setting

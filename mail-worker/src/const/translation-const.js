@@ -1,5 +1,3 @@
-export const MODEL_ID = '@cf/meta/llama-3.1-8b-instruct-fast';
-
 export const SUPPORTED_TARGET_LANGS = ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'ru', 'pt', 'it'];
 
 export const LANG_NAMES = {

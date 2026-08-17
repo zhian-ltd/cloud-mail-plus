@@ -117,9 +117,9 @@ Worker 内置 cron 定时任务，每天自动导出 D1 全量数据为 SQL 并 
 - 支持手动触发：`POST /api/backup/<jwt_secret>`
 - 查看备份列表：`GET /api/backup/<jwt_secret>/list`
 
-### 8. AI 邮件助手（Cloudflare Workers AI）
+### 8. AI 邮件助手（可配置 AI 提供商）
 
-集成 [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/) (`@cf/moonshotai/kimi-k2.5`) 的对话式邮件助手，登录后从 Header **✨ 邮件助手** 按钮打开侧边栏即可与 AI 对话。
+对话式邮件助手支持 Cloudflare Workers AI 和 OpenAI 兼容接口。默认模型为 Free 计划可用的 `@cf/zai-org/glm-4.7-flash`；也可由管理员在“系统设置 → AI 设置”中切换为 `gpt-5.6-terra` 等兼容模型。登录后从 Header **✨ 邮件助手** 按钮打开侧边栏即可与 AI 对话。
 
 **9 个邮件工具**（AI 自动选择调用）：
 
@@ -144,11 +144,13 @@ Worker 内置 cron 定时任务，每天自动导出 D1 全量数据为 SQL 并 
 - 自动起草仅 2 步上限（读取 + 起草）
 - AI 模型决定该邮件无需回复时（noreply / spam / 自动通知）会自动跳过
 
-**配置**：登录后进入 **设置** → 滑动到底部 **✨ AI 邮件助手** 部分 → 启用「AI 助手」开关 + 可选「自动起草」+ 自定义人设说明。
+**配置**：管理员先在 **系统设置 → AI 设置** 选择全局提供商、模型并测试连接；每个用户再到 **个人设置 → ✨ AI 邮件助手** 启用助手、可选自动起草并填写人设说明。邮件助手、自动草稿和邮件翻译共同使用这套全局模型配置。
 
-**模型与计费**：使用 Cloudflare Workers AI Kimi K2.5。免费层每天 10000 neurons，单次对话约消耗 50-200 neurons，足够正常使用。
+**模型与计费**：默认 `@cf/zai-org/glm-4.7-flash` 可用于 Workers Free。`@cf/moonshotai/kimi-k2.6` 自 2026-07-28 起需要 Workers Paid，Free 计划会返回内部错误 `5035`。若选 OpenAI 兼容接口，则由对应服务商独立计费；例如 `gpt-5.6-terra` 支持 Chat Completions 和函数调用，但 OpenAI API Free 层不提供该模型。
 
-**集成栈**：[AI SDK v6](https://sdk.vercel.ai/) + `@ai-sdk/vue` v3 (`Chat` 类) + `workers-ai-provider` + Cloudflare Workers AI。完整中英文 i18n。
+**集成栈**：[AI SDK v6](https://sdk.vercel.ai/) + `@ai-sdk/vue` v3 (`Chat` 类) + `workers-ai-provider` / OpenAI 兼容 Chat Completions。OpenAI 兼容 API Key 使用服务端 `jwt_secret` 派生密钥进行 AES-GCM 加密，明文不会返回前端。
+
+详细配置与模型选择见 [AI 设置说明](docs/ai-configuration.md)。
 
 ### 9. Authelia SSO（OIDC）
 
@@ -186,7 +188,7 @@ bash scripts/deploy.sh
 - 检查 wrangler 登录状态（未登录会启动 `wrangler login`）
 - 幂等创建 D1 / KV / R2（已存在则复用，不会重复创建）
 - 生成 64 字符 JWT secret
-- **可选启用 AI Email Agent**（Workers AI kimi-k2.5 + 自动起草） — 自动写入 `[ai]` binding、`EmailAgent` Durable Object、DO migration、agent schema
+- **可选启用 AI Email Agent**（默认 Workers AI GLM 4.7 Flash + 自动起草） — 自动写入 `[ai]` binding、`EmailAgent` Durable Object、DO migration、agent schema
 - 在 `wrangler.toml` 的标记块内写入 bindings + vars（重跑替换不重复）
 - `wrangler deploy`（自动构建 Vue 前端）
 - 调用 `/api/init/<jwt_secret>` 初始化 D1 schema（含 agent 表）
@@ -223,9 +225,9 @@ bash scripts/deploy.sh --with-ai
 - **发送 + 删除需要二次确认**（在侧边栏底部弹出确认卡片，永远不会自动执行）
 - **收到新邮件时自动起草回复**（保存到草稿箱，不会自动发送）
 - **完整的中英文 i18n**（跟随系统语言切换）
-- **模型**：`@cf/moonshotai/kimi-k2.5`（Cloudflare Workers AI，按 neuron 计费，免费层每天 10000 neurons）
+- **默认模型**：`@cf/zai-org/glm-4.7-flash`（Workers Free 可用）；管理员也可改用 OpenAI 兼容接口
 
-> **集成架构**：AI SDK v6 (`ai` 包) + `@ai-sdk/vue` v3 (`Chat` 类) + `workers-ai-provider` + Cloudflare Workers AI。Worker 路由直接调用 `streamText()` 通过 SSE 流响应（不使用 Durable Object，避免 AIChatAgent 与 Vue Chat 的 WebSocket/HTTP 协议不匹配问题）。
+> **集成架构**：AI SDK v6 (`ai` 包) + `@ai-sdk/vue` v3 (`Chat` 类) + Cloudflare Workers AI / OpenAI 兼容 Chat Completions。Worker 路由直接调用 `streamText()` 通过 SSE 流响应（不使用 Durable Object，避免 AIChatAgent 与 Vue Chat 的 WebSocket/HTTP 协议不匹配问题）。
 
 ### 已知部署注意事项
 

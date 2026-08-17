@@ -1,10 +1,8 @@
 import { AIChatAgent } from '@cloudflare/ai-chat';
-import { createWorkersAI } from 'workers-ai-provider';
 import { streamText, generateText, convertToModelMessages, stepCountIs } from 'ai';
 import { buildTools, executeConfirmedTool } from './tools';
 import { buildSystemPrompt, buildAutoDraftPrompt } from './system-prompt';
-
-const MODEL_ID = '@cf/moonshotai/kimi-k2.5';
+import aiConfigService from '../service/ai-config-service';
 
 // Per-user agent. Routes deterministically to a single DO instance via
 //   env.EMAIL_AGENT.idFromName(`user-${userId}`)
@@ -13,11 +11,17 @@ export class EmailAgent extends AIChatAgent {
   // Called by AIChatAgent when a new chat message arrives over the websocket / SSE pipe.
   async onChatMessage(onFinish) {
     const { userId, userEmail, persona, currentBoxName, locale } = await this._loadContext();
-    const workersai = createWorkersAI({ binding: this.env.AI });
-    const tools = buildTools({ env: this.env, userId, userEmail });
+    const aiRuntime = await aiConfigService.resolveModel({ env: this.env });
+    const tools = buildTools({
+      env: this.env,
+      userId,
+      userEmail,
+      aiModel: aiRuntime.model,
+      aiModelId: aiRuntime.modelId,
+    });
 
     const result = streamText({
-      model: workersai(MODEL_ID),
+      model: aiRuntime.model,
       system: buildSystemPrompt({ userEmail, persona, currentBoxName, locale }),
       messages: convertToModelMessages(this.messages),
       tools,
@@ -42,13 +46,19 @@ export class EmailAgent extends AIChatAgent {
     if (!userId) return { skipped: true, reason: 'no-userId' };
 
     // Fetch the original email server-side
-    const tools = buildTools({ env: this.env, userId, userEmail });
+    const aiRuntime = await aiConfigService.resolveModel({ env: this.env });
+    const tools = buildTools({
+      env: this.env,
+      userId,
+      userEmail,
+      aiModel: aiRuntime.model,
+      aiModelId: aiRuntime.modelId,
+    });
     const original = await tools.getEmail.execute({ emailId });
     if (original.error) return { skipped: true, reason: original.error };
 
-    const workersai = createWorkersAI({ binding: this.env.AI });
     const { text, toolCalls } = await generateText({
-      model: workersai(MODEL_ID),
+      model: aiRuntime.model,
       system: buildAutoDraftPrompt({ userEmail, persona, originalEmail: original }),
       prompt: 'Decide and act per the system prompt.',
       tools: { draftReply: tools.draftReply },  // restrict to single tool

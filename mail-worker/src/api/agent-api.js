@@ -2,12 +2,10 @@ import app from '../hono/hono';
 import userContext from '../security/user-context';
 import userService from '../service/user-service';
 import result from '../model/result';
-import { streamText, convertToModelMessages, stepCountIs } from 'ai';
-import { createWorkersAI } from 'workers-ai-provider';
+import { streamText, stepCountIs } from 'ai';
 import { buildTools, executeConfirmedTool } from '../agent/tools';
 import { buildSystemPrompt } from '../agent/system-prompt';
-
-const MODEL_ID = '@cf/moonshotai/kimi-k2.5';
+import aiConfigService from '../service/ai-config-service';
 
 // ---- chat: AI SDK v6 streaming, direct (no DO routing — protocol mismatch with AIChatAgent) ----
 app.post('/agent/chat', async (c) => {
@@ -16,7 +14,6 @@ app.post('/agent/chat', async (c) => {
 
   const user = await userService.findById(c, userId);
   if (!user?.agentEnabled) return c.json(result.fail('agent-disabled'), 403);
-  if (!c.env.AI) return c.json(result.fail('AI binding not configured on this Worker'), 503);
 
   let body;
   try { body = await c.req.json(); }
@@ -43,12 +40,18 @@ app.post('/agent/chat', async (c) => {
   console.log('[agent/chat] model messages:', JSON.stringify(modelMessages).slice(0, 500));
   console.log('[agent/chat] is array:', Array.isArray(modelMessages), 'len:', modelMessages.length);
 
-  const workersai = createWorkersAI({ binding: c.env.AI });
-  const tools = buildTools({ env: c.env, userId, userEmail: user.email });
+  const aiRuntime = await aiConfigService.resolveModel(c);
+  const tools = buildTools({
+    env: c.env,
+    userId,
+    userEmail: user.email,
+    aiModel: aiRuntime.model,
+    aiModelId: aiRuntime.modelId,
+  });
 
   try {
     const stream = streamText({
-      model: workersai(MODEL_ID),
+      model: aiRuntime.model,
       system: buildSystemPrompt({
         userEmail: user.email,
         persona: user.agentPersona || '',
@@ -94,11 +97,15 @@ app.get('/agent/settings', async (c) => {
   const userId = userContext.getUserId(c);
   if (!userId) return c.json(result.fail('unauthorized'), 401);
   const u = await userService.findById(c, userId);
+  const aiConfig = await aiConfigService.publicConfig(c);
   return c.json(result.ok({
     agentEnabled: !!u?.agentEnabled,
     agentAutoDraft: !!u?.agentAutoDraft,
     agentPersona: u?.agentPersona || '',
     bindingAvailable: !!c.env.EMAIL_AGENT,
+    aiProvider: aiConfig.aiProvider,
+    aiModel: aiConfig.aiModel,
+    aiReady: aiConfig.aiReady,
   }));
 });
 

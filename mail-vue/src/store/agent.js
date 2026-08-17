@@ -10,6 +10,9 @@ export const useAgentStore = defineStore('agent', {
       agentEnabled: false,
       agentAutoDraft: false,
       agentPersona: '',
+      aiProvider: 'workers-ai',
+      aiModel: '',
+      aiReady: false,
     },
   }),
 
@@ -21,6 +24,9 @@ export const useAgentStore = defineStore('agent', {
         this.settings.agentEnabled = !!s.agentEnabled;
         this.settings.agentAutoDraft = !!s.agentAutoDraft;
         this.settings.agentPersona = s.agentPersona || '';
+        this.settings.aiProvider = s.aiProvider || 'workers-ai';
+        this.settings.aiModel = s.aiModel || '';
+        this.settings.aiReady = !!s.aiReady;
       } catch (e) {
         console.warn('[agent.hydrate]', e);
       } finally {

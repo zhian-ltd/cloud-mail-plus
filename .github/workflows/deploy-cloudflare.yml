@@ -220,11 +220,6 @@ jobs:
             exit 1
           fi
 
-          if [[ "$AI_EMAIL_AGENT_ENABLED" == "true" && "$WORKERS_AI_ENABLED" != "true" ]]; then
-            echo "❌ AI_EMAIL_AGENT_ENABLED=true requires WORKERS_AI_ENABLED=true."
-            exit 1
-          fi
-
           if [[ -n "$MAIL_BRIDGE_URL" && -z "$MAIL_BRIDGE_KEY" ]]; then
             echo "❌ MAIL_BRIDGE_URL requires the MAIL_BRIDGE_KEY repository secret."
             exit 1
