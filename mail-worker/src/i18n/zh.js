@@ -94,6 +94,12 @@ const zh = {
 	aiBadOutput: '翻译服务返回异常',
 	aiTimeout: '翻译请求超时',
 	aiRateLimited: '翻译请求过多，请稍后重试',
+	personalPushInvalidChatId: 'Telegram Chat ID 格式无效',
+	personalPushInvalidEmail: '邮件推送地址格式无效或数量过多',
+	personalPushTokenTooLong: 'Telegram Bot Token 长度超出限制',
+	personalPushTelegramIncomplete: '启用 Telegram 推送前必须填写 Bot Token 和 Chat ID',
+	personalPushForwardIncomplete: '启用第三方邮箱推送前必须填写转发邮箱',
+	personalPushRuleEmailNotOwned: '推送规则只能选择当前用户自己的邮箱',
 	perms: {
 		"邮件": "邮件",
 		"邮件发送": "邮件发送",

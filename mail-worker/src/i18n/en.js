@@ -94,6 +94,12 @@ const en = {
 	aiBadOutput: 'Translation service returned invalid output',
 	aiTimeout: 'Translation request timed out',
 	aiRateLimited: 'Too many translation requests, please retry later',
+	personalPushInvalidChatId: 'Invalid Telegram Chat ID',
+	personalPushInvalidEmail: 'A push email address is invalid or too many addresses were provided',
+	personalPushTokenTooLong: 'Telegram Bot Token is too long',
+	personalPushTelegramIncomplete: 'A Bot Token and Chat ID are required before enabling Telegram push',
+	personalPushForwardIncomplete: 'At least one forwarding address is required before enabling email push',
+	personalPushRuleEmailNotOwned: 'Push rules may only use mailboxes owned by the current user',
 	perms: {
 		"邮件": "Emails",
 		"邮件发送": "Send Email",

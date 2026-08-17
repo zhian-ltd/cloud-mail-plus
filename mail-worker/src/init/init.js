@@ -32,8 +32,34 @@ const dbInit = {
 		await this.v3_1DB(c);
 		await this.v3_2DB(c);
 		await this.v3_3DB(c);
+		await this.v3_4DB(c);
 		await settingService.refresh(c);
 		return c.text('success');
+	},
+
+	async v3_4DB(c) {
+		try {
+			await c.env.db.prepare(`
+				CREATE TABLE IF NOT EXISTS user_push_setting (
+					user_id INTEGER PRIMARY KEY,
+					tg_bot_token TEXT NOT NULL DEFAULT '',
+					tg_chat_id TEXT NOT NULL DEFAULT '',
+					tg_bot_status INTEGER NOT NULL DEFAULT 1,
+					tg_msg_from TEXT NOT NULL DEFAULT 'only-name',
+					tg_msg_to TEXT NOT NULL DEFAULT 'show',
+					tg_msg_text TEXT NOT NULL DEFAULT 'hide',
+					forward_email TEXT NOT NULL DEFAULT '',
+					forward_status INTEGER NOT NULL DEFAULT 1,
+					rule_email TEXT NOT NULL DEFAULT '',
+					rule_type INTEGER NOT NULL DEFAULT 0,
+					create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+				)
+			`).run();
+		} catch (e) {
+			console.error(`个人邮件推送配置表初始化失败：${e.message}`);
+			throw e;
+		}
 	},
 
 	async v3_3DB(c) {

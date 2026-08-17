@@ -19,6 +19,7 @@ import reqUtils from '../utils/req-utils';
 import {oauth} from "../entity/oauth";
 import oauthService from "./oauth-service";
 import ssoIdentityService from './sso-identity-service';
+import userPushSettingService from './user-push-setting-service';
 
 const userService = {
 
@@ -106,6 +107,7 @@ const userService = {
 		await accountService.physicsDeleteByUserIds(c, userIds);
 		await oauthService.deleteByUserIds(c, userIds);
 		await ssoIdentityService.deleteByUserIds(c, userIds);
+		await userPushSettingService.deleteByUserIds(c, userIds);
 		await orm(c).delete(user).where(inArray(user.userId, userIds)).run();
 	},
 

@@ -43,11 +43,14 @@ const telegramService = {
 
 	},
 
-	async sendEmailToBot(c, email) {
+	async sendEmailToBot(c, email, personalSetting = null) {
 
-		const { tgBotToken, tgChatId, customDomain, tgMsgTo, tgMsgFrom, tgMsgText } = await settingService.query(c);
+		const globalSetting = await settingService.query(c);
+		const pushSetting = personalSetting || globalSetting;
+		const { tgBotToken, tgChatId, tgMsgTo, tgMsgFrom, tgMsgText } = pushSetting;
+		const { customDomain } = globalSetting;
 
-		const tgChatIds = tgChatId.split(',');
+		const tgChatIds = tgChatId.split(',').map(item => item.trim()).filter(Boolean);
 
 		const jwtToken = await jwtUtils.generateToken(c, { emailId: email.emailId })
 

@@ -12,3 +12,10 @@ export function userDelete() {
     return http.delete('/my/delete')
 }
 
+export function personalPushSettingQuery() {
+    return http.get('/my/pushSetting')
+}
+
+export function personalPushSettingSet(setting) {
+    return http.put('/my/pushSetting', setting)
+}

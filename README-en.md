@@ -160,6 +160,12 @@ The login page can optionally show a Single Sign-On button. The Worker uses OIDC
 
 See the [Authelia SSO deployment guide](docs/authelia-sso.md) for configuration, migration, and verification.
 
+### 10. Personal Email Push
+
+The administrator's **System Settings → Email Push** remains the global, all-domain channel. Administrators and regular users can also configure an independent Telegram bot, Chat ID, external forwarding addresses, and mailbox rules under **Personal Settings → Personal Email Push**. Personal delivery only processes messages received by mailboxes owned by that user, with settings isolated by `user_id`.
+
+See the [personal email push guide](docs/personal-mail-push.md) for behavior, security boundaries, and upgrade steps.
+
 ---
 
 ## Deployment
