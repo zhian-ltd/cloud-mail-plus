@@ -36,7 +36,7 @@ describe('incoming email forwarding provider selection', () => {
 
 	afterEach(() => vi.restoreAllMocks());
 
-	it('builds a Resend-safe forward from the local mailbox with Reply-To and attachments', () => {
+	it('builds a clean Resend copy without a forwarding wrapper while retaining original metadata', () => {
 		const form = buildResendForwardForm({
 			parsedEmail,
 			sourceEmail: 'user@example.com',
@@ -49,12 +49,19 @@ describe('incoming email forwarding provider selection', () => {
 		});
 
 		expect(form).toMatchObject({
-			from: 'user <user@example.com>',
+			from: 'Sender <user@example.com>',
 			to: ['archive@third-party.example'],
 			replyTo: 'sender@outside.example',
-			subject: 'Fwd: Original subject',
+			subject: 'Original subject',
+			html: '<p>Original body</p>',
+			text: 'Original body',
+			headers: {
+				'X-Original-From': 'Sender <sender@outside.example>',
+				'X-Original-To': 'User <user@example.com>',
+				'X-Original-Recipient': 'user@example.com',
+			},
 		});
-		expect(form.html).toContain('Sender &lt;sender@outside.example&gt;');
+		expect(form.html).not.toContain('Forwarded message');
 		expect(form.attachments).toEqual([expect.objectContaining({
 			filename: 'note.txt',
 			content: 'aGVsbG8=',
@@ -132,4 +139,3 @@ describe('incoming email forwarding provider selection', () => {
 		expect(result[0]).toMatchObject({ provider: 'cloudflare', ok: false });
 	});
 });
-

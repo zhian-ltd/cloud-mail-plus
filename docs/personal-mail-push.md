@@ -19,11 +19,11 @@ Telegram Bot Token 只保存在 Worker 后端的 D1 数据库中。查询个人�
 
 第三方邮箱转发遵循管理员在“系统设置 → 邮件发送方式”中的选择：
 
-- **仅 Resend**：使用收件地址所属域名配置的 Resend Token，目标地址无需在 Cloudflare Email Routing 中验证；
-- **CF 优先**：先使用 Cloudflare 原生转发，目标未验证等原因导致失败时自动回退 Resend；
-- **仅 CF**：只使用 Cloudflare 原生转发，目标地址仍必须先在 Cloudflare 中验证。
+- **仅 Resend**：使用收件地址所属域名配置的 Resend Token，目标地址无需在 Cloudflare Email Routing 中验证。转发件不添加 `Fwd:` 主题或转发正文外壳，保留原主题、正文和附件，并将回复地址指向原发件人。由于 Resend 只能使用已验证的本地域名发件，实际 From 仍为本地收件地址（显示名使用原发件人），实际 To 为转发目标；
+- **CF 优先**：先使用 Cloudflare 原生透明转发，可保留原始 From、To 和 Subject；目标未验证等原因导致失败时，自动回退为 Resend 无外壳副本；
+- **仅 CF**：只使用 Cloudflare 原生透明转发，目标地址必须先在 Cloudflare 中验证。
 
-通过 Resend 转发时，邮件从本地收件地址发出，原始发件人写入 `Reply-To`，并保留正文和附件。因此回复转发邮件时仍会回复给原始发件人，同时不会伪造外部发件人域名。
+通过 Resend 转发时，邮件从本地收件地址发出，原始发件人写入 `Reply-To`，原始 From、To 和 Message-ID 也会以 `X-Original-*` 头保留。因此回复时仍会回复给原始发件人，同时不会伪造外部发件人域名。
 
 ## 用户与邮件隔离
 

@@ -10,16 +10,6 @@ function splitAddresses(value) {
 		.filter(Boolean))];
 }
 
-function escapeHtml(value) {
-	return String(value || '').replace(/[&<>"']/g, character => ({
-		'&': '&amp;',
-		'<': '&lt;',
-		'>': '&gt;',
-		'"': '&quot;',
-		"'": '&#39;',
-	}[character]));
-}
-
 function addressText(address) {
 	if (!address) return '';
 	if (typeof address === 'string') return address;
@@ -33,11 +23,6 @@ function addressListText(addresses) {
 		.join(', ');
 }
 
-function forwardSubject(subject) {
-	const value = String(subject || '').trim();
-	return /^(fwd?|转发)\s*[:：]/i.test(value) ? value : `Fwd: ${value || '(no subject)'}`;
-}
-
 function attachmentContent(content) {
 	if (typeof content === 'string') return fileUtils.base64ToDataStr(content);
 	return fileUtils.buffToBase64(content);
@@ -47,36 +32,29 @@ export function buildResendForwardForm({ parsedEmail, sourceEmail, destination, 
 	const originalFrom = addressText(parsedEmail?.from);
 	const originalTo = addressListText(parsedEmail?.to);
 	const originalSubject = String(parsedEmail?.subject || '');
-	const originalDate = parsedEmail?.date ? new Date(parsedEmail.date).toUTCString() : '';
-	const forwardedText = [
-		'---------- Forwarded message ----------',
-		originalFrom ? `From: ${originalFrom}` : '',
-		originalDate ? `Date: ${originalDate}` : '',
-		originalSubject ? `Subject: ${originalSubject}` : '',
-		originalTo ? `To: ${originalTo}` : '',
-		'',
-		parsedEmail?.text || String(parsedEmail?.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-	].filter((line, index, lines) => line || (index > 0 && lines[index - 1])).join('\n');
-
-	const headerRows = [
-		['From', originalFrom],
-		['Date', originalDate],
-		['Subject', originalSubject],
-		['To', originalTo],
-	].filter(([, value]) => value)
-		.map(([label, value]) => `<div><strong>${label}:</strong> ${escapeHtml(value)}</div>`)
-		.join('');
-	const originalHtml = parsedEmail?.html
-		|| `<pre style="white-space:pre-wrap;font-family:inherit">${escapeHtml(parsedEmail?.text || '')}</pre>`;
+	const displayName = String(parsedEmail?.from?.name || parsedEmail?.from?.address || emailUtils.getName(sourceEmail))
+		.replace(/[\r\n<>]/g, ' ')
+		.replace(/"/g, '\\"')
+		.trim();
+	const safeHeader = value => String(value || '').replace(/[\r\n]+/g, ' ').trim();
 
 	const form = {
-		from: `${emailUtils.getName(sourceEmail)} <${sourceEmail}>`,
+		// Resend can authenticate only a verified local domain. Keep the original
+		// sender as the display name and Reply-To, without spoofing its address.
+		from: `${displayName || emailUtils.getName(sourceEmail)} <${sourceEmail}>`,
 		to: [destination],
-		subject: forwardSubject(originalSubject),
-		html: `<div style="color:#666;margin-bottom:16px">---------- Forwarded message ----------${headerRows}</div>${originalHtml}`,
-		text: forwardedText,
+		subject: originalSubject || '(no subject)',
+		headers: {
+			'X-Original-From': safeHeader(originalFrom),
+			'X-Original-To': safeHeader(originalTo),
+			'X-Original-Recipient': safeHeader(sourceEmail),
+		},
 	};
+	if (parsedEmail?.html != null) form.html = parsedEmail.html;
+	if (parsedEmail?.text != null) form.text = parsedEmail.text;
+	if (form.html == null && form.text == null) form.text = '';
 	if (parsedEmail?.from?.address) form.replyTo = parsedEmail.from.address;
+	if (parsedEmail?.messageId) form.headers['X-Original-Message-ID'] = safeHeader(parsedEmail.messageId);
 
 	const resendAttachments = attachments
 		.filter(attachment => attachment?.content && attachment?.filename)
@@ -148,4 +126,3 @@ export async function forwardIncomingEmail({
 		return { destination, provider: 'cloudflare', ok: false, error };
 	}));
 }
-
