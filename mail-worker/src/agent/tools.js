@@ -140,18 +140,42 @@ export function buildTools({ env, userId, userEmail, aiModel, aiModelId }) {
             { role: 'user', content: `Reply to:\nFrom: ${original.sendEmail}\nSubject: ${original.subject}\n\n${(original.text || original.content || '').slice(0, 4000)}\n\nInstructions: ${instructions}` },
           ],
         });
+		const subject = original.subject?.startsWith('Re: ') ? original.subject : `Re: ${original.subject || ''}`;
+		const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         const draftId = await emailService.saveDraft(c, {
           userId,
           accountId: original.accountId,
+		  sendEmail: original.toEmail || userEmail,
+		  name: (original.toEmail || userEmail).split('@')[0],
           toEmail: original.sendEmail,
-          subject: original.subject?.startsWith('Re: ') ? original.subject : `Re: ${original.subject || ''}`,
+		  toName: original.name || '',
+		  subject,
           inReplyTo: original.messageId || '',
           relation: `${original.relation || ''} ${original.messageId || ''}`.trim(),
           content: html,
-          text: html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+		  text,
           aiMetadata: JSON.stringify({ source: 'tool', sourceEmailId: emailId, model: aiModelId }),
         });
-        return { draftId, preview: html.slice(0, 400), to: original.sendEmail };
+		return {
+		  draftId,
+		  preview: html.slice(0, 400),
+		  to: original.sendEmail,
+		  draft: {
+			serverDraftId: draftId,
+			sendEmail: original.toEmail || userEmail,
+			receiveEmail: [original.sendEmail],
+			accountId: original.accountId,
+			name: (original.toEmail || userEmail).split('@')[0],
+			subject,
+			content: html,
+			text,
+			sendType: 'reply',
+			emailId,
+			inReplyTo: original.messageId || '',
+			relation: `${original.relation || ''} ${original.messageId || ''}`.trim(),
+			attachments: [],
+		  },
+		};
       },
     }),
 
@@ -170,12 +194,29 @@ export function buildTools({ env, userId, userEmail, aiModel, aiModelId }) {
             { role: 'user', content: `To: ${to}\nSubject: ${subject}\nInstructions: ${instructions}` },
           ],
         });
+		const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         const draftId = await emailService.saveDraft(c, {
-          userId, accountId: 0, toEmail: to, subject, content: html,
-          text: html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+		  userId, accountId: 0, sendEmail: userEmail, name: userEmail.split('@')[0], toEmail: to, subject, content: html,
+		  text,
           aiMetadata: JSON.stringify({ source: 'tool-new', model: aiModelId }),
         });
-        return { draftId, preview: html.slice(0, 400) };
+		return {
+		  draftId,
+		  preview: html.slice(0, 400),
+		  draft: {
+			serverDraftId: draftId,
+			sendEmail: userEmail,
+			receiveEmail: [to],
+			accountId: 0,
+			name: userEmail.split('@')[0],
+			subject,
+			content: html,
+			text,
+			sendType: '',
+			emailId: 0,
+			attachments: [],
+		  },
+		};
       },
     }),
 
@@ -199,7 +240,7 @@ export function buildTools({ env, userId, userEmail, aiModel, aiModelId }) {
 export async function executeConfirmedTool({ env, userId, userEmail, name, args }) {
   const c = { env };
   if (name === 'sendDraft') {
-    const draft = await emailService.detail(c, args.draftId, userId);
+	const draft = await emailService.draftDetail(c, args.draftId, userId);
     if (!draft) return { error: 'Draft not found' };
     const r = await cfEmailService.send(env, {
       from: { email: userEmail, name: userEmail.split('@')[0] },

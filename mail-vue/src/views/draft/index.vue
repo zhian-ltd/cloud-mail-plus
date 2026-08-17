@@ -30,6 +30,7 @@ import {defineOptions, ref, watch, toRaw} from "vue";
 import {useUiStore} from "@/store/ui.js";
 import {userDraftStore} from "@/store/draft.js";
 import db from "@/db/db.js"
+import http from "@/axios/index.js";
 
 defineOptions({
   name: 'draft'
@@ -41,9 +42,10 @@ const scroll = ref({})
 
 watch(() => draftStore.setDraft, async () => {
 
-  const draft = toRaw(draftStore.setDraft)
+  const draft = {...toRaw(draftStore.setDraft)}
   const draftId = draft.draftId
-  const attachments = toRaw(draftStore.setDraft.attachments)
+  const attachments = toRaw(draftStore.setDraft.attachments || [])
+  const serverDraftId = draft.serverDraftId
 
   delete draft.draftId
   delete draft.attachments
@@ -51,12 +53,14 @@ watch(() => draftStore.setDraft, async () => {
   if (!draft.content && !draft.subject && !(draft.receiveEmail.length > 0)) {
     await db.value.draft.delete(draftId);
     await db.value.att.delete(draftId);
+    if (serverDraftId) await http.delete(`/agent/draft/${serverDraftId}`);
     draftStore.refreshList++
     return;
   }
 
   await db.value.draft.update(draftId, draft);
   await db.value.att.update(draftId, {attachments: attachments});
+  if (serverDraftId) await http.put(`/agent/draft/${serverDraftId}`, draft);
   draftStore.refreshList++
 }, {
   deep: true
@@ -78,7 +82,12 @@ function getEmailList() {
 }
 
 async function deleteDraft(draftIds) {
+  const drafts = await db.value.draft.bulkGet(draftIds);
+  await Promise.all(drafts.filter(draft => draft?.serverDraftId).map(draft =>
+    http.delete(`/agent/draft/${draft.serverDraftId}`)
+  ));
   await db.value.draft.bulkDelete(draftIds);
+  await db.value.att.bulkDelete(draftIds);
   draftStore.refreshList++
 }
 

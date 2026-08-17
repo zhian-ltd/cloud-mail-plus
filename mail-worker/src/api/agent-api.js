@@ -6,6 +6,8 @@ import { streamText, stepCountIs } from 'ai';
 import { buildTools, executeConfirmedTool } from '../agent/tools';
 import { buildSystemPrompt } from '../agent/system-prompt';
 import aiConfigService from '../service/ai-config-service';
+import emailService from '../service/email-service';
+import { uiMessagesToModelMessages } from '../agent/message-utils';
 
 // ---- chat: AI SDK v6 streaming, direct (no DO routing — protocol mismatch with AIChatAgent) ----
 app.post('/agent/chat', async (c) => {
@@ -25,12 +27,7 @@ app.post('/agent/chat', async (c) => {
 
   // Build ModelMessage[] manually — convertToModelMessages in AI SDK v6 produces
   // unexpected shapes for the @ai-sdk/vue Chat payload format on Workers runtime.
-  const modelMessages = uiMessages.map(m => {
-    const text = Array.isArray(m.parts)
-      ? m.parts.filter(p => p?.type === 'text').map(p => p.text).join('\n')
-      : (m.content || '');
-    return { role: m.role || 'user', content: text };
-  }).filter(m => m.content);
+  const modelMessages = uiMessagesToModelMessages(uiMessages);
 
   if (modelMessages.length === 0) {
     return c.json(result.fail('no-messages-in-request'), 400);
@@ -83,6 +80,25 @@ app.post('/agent/confirm', async (c) => {
   if (!['sendDraft', 'deleteEmail'].includes(name)) return c.json(result.fail('unknown-tool'), 400);
   const r = await executeConfirmedTool({ env: c.env, userId, userEmail: user.email, name, args });
   return c.json(result.ok(r));
+});
+
+app.put('/agent/draft/:draftId', async (c) => {
+  const userId = userContext.getUserId(c);
+  const draftId = Number(c.req.param('draftId'));
+  if (!userId) return c.json(result.fail('unauthorized'), 401);
+  if (!Number.isInteger(draftId) || draftId <= 0) return c.json(result.fail('invalid-draft-id'), 400);
+  const updated = await emailService.updateDraft(c, draftId, userId, await c.req.json());
+  if (!updated) return c.json(result.fail('draft-not-found'), 404);
+  return c.json(result.ok({ updated: true }));
+});
+
+app.delete('/agent/draft/:draftId', async (c) => {
+  const userId = userContext.getUserId(c);
+  const draftId = Number(c.req.param('draftId'));
+  if (!userId) return c.json(result.fail('unauthorized'), 401);
+  if (!Number.isInteger(draftId) || draftId <= 0) return c.json(result.fail('invalid-draft-id'), 400);
+  const deleted = await emailService.deleteDraft(c, draftId, userId);
+  return c.json(result.ok({ deleted }));
 });
 
 app.get('/agent/state', async (c) => {

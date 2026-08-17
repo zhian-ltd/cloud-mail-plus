@@ -113,6 +113,7 @@ import db from "@/db/db.js";
 import dayjs from "dayjs";
 import {useI18n} from "vue-i18n";
 import {ElMessageBox} from "element-plus";
+import http from "@/axios/index.js";
 
 defineExpose({
   open,
@@ -156,6 +157,7 @@ const form = reactive({
   emailId: 0,
   attachments: [],
   draftId: null,
+  serverDraftId: undefined,
 })
 
 const selectRecipientList = ref([])
@@ -352,7 +354,7 @@ async function sendEmail() {
 
   emailSend(form, (e) => {
     percent.value = Math.round((e.loaded * 98) / e.total)
-  }).then(emailList => {
+  }).then(async emailList => {
     const email = emailList[0]
     emailList.forEach(item => {
       emailStore.sendScroll?.addItem(item)
@@ -370,6 +372,13 @@ async function sendEmail() {
     addRecipientRecord();
 
     if (form.draftId) {
+	  if (form.serverDraftId) {
+		try {
+		  await http.delete(`/agent/draft/${form.serverDraftId}`);
+		} catch (error) {
+		  console.warn('[draft] unable to remove synchronized server draft', error);
+		}
+	  }
       form.subject = ''
       form.content = ''
       form.receiveEmail = []
@@ -417,6 +426,7 @@ function resetForm() {
   form.sendType = ''
   form.emailId = 0
   form.draftId = null
+  form.serverDraftId = undefined
   backReply.content = ''
   backReply.subject = ''
   backReply.receiveEmail = []
@@ -586,6 +596,7 @@ function close() {
     const formData = {...toRaw(form)};
     delete formData.draftId
     delete formData.attachments
+    if (!formData.serverDraftId) delete formData.serverDraftId
     formData.createTime = dayjs().utc().format('YYYY-MM-DD HH:mm:ss');
     const draftId = await db.value.draft.add({...formData})
     db.value.att.add({draftId, attachments: toRaw(form.attachments)})

@@ -7,11 +7,22 @@ import taskLists from 'markdown-it-task-lists';
 import { useAgentStore } from '@/store/agent';
 import ToolConfirmation from './ToolConfirmation.vue';
 import http from '@/axios/index.js';
+import db from '@/db/db.js';
+import { userDraftStore } from '@/store/draft.js';
+import { useUserStore } from '@/store/user.js';
+import { useAccountStore } from '@/store/account.js';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+dayjs.extend(utc);
 
 const props = defineProps({ visible: Boolean });
 const emit = defineEmits(['close']);
 
 const store = useAgentStore();
+const draftStore = userDraftStore();
+const userStore = useUserStore();
+const accountStore = useAccountStore();
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true }).use(taskLists);
 const scroller = ref(null);
 const input = ref('');
@@ -30,24 +41,83 @@ const transport = new DefaultChatTransport({
 // Chat is a class. shallowRef tracks identity; the class manages internal reactivity.
 const chat = shallowRef(new Chat({ transport, messages: store.messages || [] }));
 
-watch(() => chat.value.messages, async () => {
+const syncingDraftIds = new Set();
+
+function toolName(part) {
+  if (part.toolName) return part.toolName;
+  return typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : '';
+}
+
+async function syncAgentDrafts(messages) {
+  for (const message of messages || []) {
+    for (const part of message.parts || []) {
+      if (!['draftReply', 'draftNew'].includes(toolName(part))) continue;
+      const output = part.output || part.result;
+      const draft = output?.draft;
+      const serverDraftId = Number(draft?.serverDraftId || output?.draftId);
+      if (!draft || !Number.isInteger(serverDraftId) || serverDraftId <= 0 || syncingDraftIds.has(serverDraftId)) continue;
+
+      syncingDraftIds.add(serverDraftId);
+      try {
+        const existing = await db.value.draft.where('serverDraftId').equals(serverDraftId).first();
+        if (existing) continue;
+
+        const account = accountStore.currentAccount?.email
+          ? accountStore.currentAccount
+          : userStore.user?.account;
+        const localDraft = {
+          ...draft,
+          serverDraftId,
+          createTime: dayjs().utc().format('YYYY-MM-DD HH:mm:ss'),
+        };
+        if (!(Number(localDraft.accountId) > 0) && account) {
+          localDraft.accountId = account.accountId;
+          localDraft.sendEmail = account.email;
+          localDraft.name = account.name || userStore.user?.name || '';
+        }
+        const attachments = Array.isArray(localDraft.attachments) ? localDraft.attachments : [];
+        delete localDraft.attachments;
+        delete localDraft.draftId;
+        const localDraftId = await db.value.draft.add(localDraft);
+        await db.value.att.put({ draftId: localDraftId, attachments });
+        draftStore.refreshList++;
+      } finally {
+        syncingDraftIds.delete(serverDraftId);
+      }
+    }
+  }
+}
+
+async function removeLocalAgentDraft(serverDraftId) {
+  const local = await db.value.draft.where('serverDraftId').equals(Number(serverDraftId)).first();
+  if (!local) return;
+  await Promise.all([
+    db.value.draft.delete(local.draftId),
+    db.value.att.delete(local.draftId),
+  ]);
+  draftStore.refreshList++;
+}
+
+watch(() => chat.value.messages, async (messages) => {
   await nextTick();
   if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
+  await syncAgentDrafts(messages);
 }, { deep: true });
 
 onMounted(async () => {
   if (!store.hydrated) await store.hydrate();
 });
 
-const pendingConfirm = computed(() =>
-  chat.value.messages
+const pendingConfirm = computed(() => {
+  const part = chat.value.messages
     .flatMap(m => m.parts || [])
     .find(p =>
       (p.type === 'tool-call' || (typeof p.type === 'string' && p.type.startsWith('tool-'))) &&
-      ['sendDraft', 'deleteEmail'].includes(p.toolName) &&
+      ['sendDraft', 'deleteEmail'].includes(toolName(p)) &&
       !(p.output || p.result)
-    )
-);
+    );
+  return part ? { ...part, toolName: toolName(part), args: part.args || part.input } : null;
+});
 
 async function onSubmit() {
   const text = input.value.trim();
@@ -62,7 +132,9 @@ async function onConfirmTool({ accepted, toolCallId, toolName, args }) {
     return;
   }
   const r = await http.post('/agent/confirm', { name: toolName, args });
-  chat.value.addToolResult({ toolCallId, output: r.data || r });
+  const output = r.data || r;
+  if (toolName === 'sendDraft' && output?.sent) await removeLocalAgentDraft(args.draftId);
+  chat.value.addToolResult({ toolCallId, output });
 }
 
 async function clearChat() {

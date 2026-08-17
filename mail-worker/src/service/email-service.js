@@ -885,6 +885,43 @@ const emailService = {
 		return inserted.emailId;
 	},
 
+	async draftDetail(c, emailId, userId) {
+		return orm(c).select().from(email).where(and(
+			eq(email.emailId, emailId),
+			eq(email.userId, userId),
+			eq(email.type, emailConst.type.SEND),
+			eq(email.status, emailConst.status.SAVING),
+			eq(email.isDel, isDel.NORMAL),
+		)).get();
+	},
+
+	async updateDraft(c, emailId, userId, fields) {
+		const current = await this.draftDetail(c, emailId, userId);
+		if (!current) return false;
+		const row = buildDraftRow({
+			...fields,
+			userId,
+			accountId: current.accountId,
+			toEmail: Array.isArray(fields.receiveEmail) ? fields.receiveEmail[0] : fields.toEmail,
+			sendEmail: fields.sendEmail || current.sendEmail,
+			name: fields.name || current.name,
+			messageId: current.messageId,
+			aiMetadata: current.aiMetadata,
+		});
+		await orm(c).update(email).set(row).where(and(
+			eq(email.emailId, emailId),
+			eq(email.userId, userId),
+			eq(email.status, emailConst.status.SAVING),
+		)).run();
+		return true;
+	},
+
+	async deleteDraft(c, emailId, userId) {
+		if (!await this.draftDetail(c, emailId, userId)) return false;
+		await this.permanentDelete(c, emailId, userId);
+		return true;
+	},
+
 	async markSent(c, emailId, userId, sendResult) {
 		await orm(c).update(email).set({
 			status: emailConst.status.SENT,
