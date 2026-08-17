@@ -17,13 +17,13 @@
 
 Telegram Bot Token 只保存在 Worker 后端的 D1 数据库中。查询个人设置时，前端只能看到“是否已配置”，不能读回 Token。
 
-第三方邮箱转发遵循管理员在“系统设置 → 邮件发送方式”中的选择：
+第三方邮箱转发始终使用 Cloudflare Email Routing 的原生 `message.forward()`：
 
-- **仅 Resend**：使用收件地址所属域名配置的 Resend Token，目标地址无需在 Cloudflare Email Routing 中验证。转发件不添加 `Fwd:` 主题或转发正文外壳，保留原主题、正文和附件，并将回复地址指向原发件人。由于 Resend 只能使用已验证的本地域名发件，实际 From 仍为本地收件地址（显示名使用原发件人），实际 To 为转发目标；
-- **CF 优先**：先使用 Cloudflare 原生透明转发，可保留原始 From、To 和 Subject；目标未验证等原因导致失败时，自动回退为 Resend 无外壳副本；
-- **仅 CF**：只使用 Cloudflare 原生透明转发，目标地址必须先在 Cloudflare 中验证。
-
-通过 Resend 转发时，邮件从本地收件地址发出，原始发件人写入 `Reply-To`，原始 From、To 和 Message-ID 也会以 `X-Original-*` 头保留。因此回复时仍会回复给原始发件人，同时不会伪造外部发件人域名。
+- 保留原始邮件的可见 From、To、Subject、正文和附件；
+- Cloudflare 自动执行 SRS/ARC 转发处理；
+- 转发目标必须先在 Cloudflare 的 Email Routing → Destination Addresses 中验证；
+- 转发免费，不要求 Workers Paid 套餐；
+- 此设置与“系统设置 → 邮件发送方式”完全独立。普通邮件和 AI 邮件发送仍可保持“仅 Resend”，不会因为启用透明转发而改用 Cloudflare Email Sending。
 
 ## 用户与邮件隔离
 
