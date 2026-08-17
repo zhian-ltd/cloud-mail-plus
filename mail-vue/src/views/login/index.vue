@@ -13,9 +13,11 @@
         <span class="form-title">{{ settingStore.settings.title }}</span>
         <span class="form-desc" v-if="show === 'login'">{{ $t('loginTitle') }}</span>
         <span class="form-desc" v-else>{{ $t('regTitle') }}</span>
-        <form v-show="show === 'login'" @submit.prevent="submit">
+        <form v-show="show === 'login'" autocomplete="on" @submit.prevent="submit">
           <el-input :class="settingStore.settings.loginDomain === 0 ? 'email-input' : ''" v-model="form.email"
-                    type="text" :placeholder="$t('emailAccount')" autocomplete="off">
+                    id="login-username" name="username" type="text" :placeholder="$t('emailAccount')"
+                    autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false"
+                    @input="normalizeAutofilledLoginUsername">
             <template #append v-if="settingStore.settings.loginDomain === 0">
               <div @click.stop="openSelect">
                 <el-select
@@ -40,7 +42,8 @@
               </div>
             </template>
           </el-input>
-          <el-input v-model="form.password" :placeholder="$t('password')" type="password" autocomplete="current-password">
+          <el-input v-model="form.password" id="login-password" name="password" :placeholder="$t('password')"
+                    type="password" autocomplete="current-password">
           </el-input>
           <el-button class="btn" type="primary" native-type="submit" :loading="loginLoading"
           >{{ $t('loginBtn') }}
@@ -376,7 +379,10 @@ const submit = () => {
     return
   }
 
-  let email = form.email + (settingStore.settings.loginDomain === 0 ? suffix.value : '');
+  const username = form.email.trim();
+  const email = username.includes('@')
+      ? username
+      : username + (settingStore.settings.loginDomain === 0 ? suffix.value : '');
 
   if (!isEmail(email)) {
     ElMessage({
@@ -402,6 +408,21 @@ const submit = () => {
   }).finally(() => {
     loginLoading.value = false
   })
+}
+
+function normalizeAutofilledLoginUsername(value) {
+  if (settingStore.settings.loginDomain !== 0) return
+
+  const username = String(value || '').trim()
+  const matchedDomain = domainList.find(domain =>
+      username.toLowerCase().endsWith(String(domain).toLowerCase())
+      && username.length > String(domain).length
+  )
+
+  if (matchedDomain) {
+    form.email = username.slice(0, -String(matchedDomain).length)
+    suffix.value = matchedDomain
+  }
 }
 
 async function saveToken(token) {
