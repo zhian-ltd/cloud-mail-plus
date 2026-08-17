@@ -188,7 +188,7 @@ const zh = {
     forwardingRulesDesc: '规则转发只会转发设置邮箱所接收的邮件',
     ruleEmailsInputDesc: '多个邮箱用, 分开',
     personalEmailPush: '个人邮件推送',
-    personalEmailPushDesc: '仅推送当前用户自己名下邮箱收到的邮件；与管理员的全域推送相互独立。',
+    personalEmailPushDesc: '推送当前用户名下邮箱收到的邮件。',
     personalTgBotDesc: '使用你自己的 Telegram Bot Token 和 Chat ID，仅接收属于你的邮件通知。',
     personalOtherEmailDesc: '仅将你收到的邮件转发到这些地址；目标邮箱需要先在 Cloudflare 中验证。',
     personalForwardingRulesDesc: '“规则转发”只能选择当前用户自己名下的邮箱。',
