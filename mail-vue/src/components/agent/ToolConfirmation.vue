@@ -27,7 +27,13 @@ function decide(accepted) {
   <div class="tool-confirm">
     <div class="tool-confirm-card" :class="{ danger }">
       <h3>{{ title }}</h3>
-      <pre>{{ JSON.stringify(tool.args, null, 2) }}</pre>
+      <div v-if="tool.context" class="confirm-context">
+        <div v-if="tool.context.subject"><span>{{ $t('subject') }}：</span>{{ tool.context.subject }}</div>
+        <div v-if="tool.context.recipients?.length"><span>{{ $t('recipient') }}：</span>{{ tool.context.recipients.join(', ') }}</div>
+        <div v-if="tool.context.sender"><span>{{ $t('sender') }}：</span>{{ tool.context.sender }}</div>
+        <div v-if="tool.context.preview" class="preview"><span>{{ $t('aiAgentPreview') }}：</span>{{ tool.context.preview }}</div>
+      </div>
+      <pre v-else>{{ JSON.stringify(tool.args, null, 2) }}</pre>
       <p v-if="danger" class="warn">⚠ {{ $t('aiAgentPermanentWarn') }}</p>
       <div class="actions">
         <button class="cancel" @click="decide(false)">{{ $t('aiAgentCancel') }}</button>
@@ -45,6 +51,10 @@ function decide(accepted) {
 .tool-confirm-card.danger { border-color: #f87171; }
 .tool-confirm h3 { margin: 0 0 8px; font-size: 14px; }
 .tool-confirm pre { font-size: 11px; background: #f8f8f8; padding: 6px; border-radius: 4px; max-height: 100px; overflow: auto; }
+.confirm-context { font-size: 12px; background: #f8f8f8; padding: 8px; border-radius: 4px; line-height: 1.5; }
+.confirm-context > div { overflow-wrap: anywhere; }
+.confirm-context span { color: #777; }
+.confirm-context .preview { margin-top: 4px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .warn { color: #b91c1c; font-size: 12px; margin: 6px 0 0; }
 .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 .actions button { padding: 6px 14px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer; }

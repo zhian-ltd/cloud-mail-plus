@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch, nextTick, shallowRef } from 'vue';
+import { ref, reactive, computed, onMounted, watch, nextTick, shallowRef } from 'vue';
 import { Chat } from '@ai-sdk/vue';
 import { DefaultChatTransport } from 'ai';
 import MarkdownIt from 'markdown-it';
@@ -12,7 +12,9 @@ import { userDraftStore } from '@/store/draft.js';
 import { useUserStore } from '@/store/user.js';
 import { useAccountStore } from '@/store/account.js';
 import { useEmailStore } from '@/store/email.js';
+import { useUiStore } from '@/store/ui.js';
 import { useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 
@@ -26,10 +28,13 @@ const draftStore = userDraftStore();
 const userStore = useUserStore();
 const accountStore = useAccountStore();
 const emailStore = useEmailStore();
+const uiStore = useUiStore();
 const route = useRoute();
+const { t } = useI18n();
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true }).use(taskLists);
 const scroller = ref(null);
 const input = ref('');
+const draftContexts = reactive({});
 
 // Token-aware transport so the JWT travels with each chat request.
 const transport = new DefaultChatTransport({
@@ -73,7 +78,7 @@ function createChat(messages = []) {
     transport,
     messages,
     onFinish: ({ message }) => {
-      void syncAgentDrafts([message]).then(async () => {
+      void syncAgentDrafts([message], { openComposer: true }).then(async () => {
         await nextTick();
         if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
       }).catch(error => {
@@ -92,25 +97,38 @@ function toolName(part) {
   return typeof part.type === 'string' && part.type.startsWith('tool-') ? part.type.slice(5) : '';
 }
 
-async function syncAgentDrafts(messages) {
+async function syncAgentDrafts(messages, { openComposer = false } = {}) {
+  let latestDraft = null;
   for (const message of messages || []) {
     for (const part of message.parts || []) {
       if (!['draftReply', 'draftNew'].includes(toolName(part))) continue;
       const output = part.output || part.result;
       const draft = output?.draft;
       const serverDraftId = Number(draft?.serverDraftId || output?.draftId);
-      await syncAgentDraft(draft, serverDraftId);
+      const localDraft = await syncAgentDraft(draft, serverDraftId);
+      if (localDraft) latestDraft = localDraft;
     }
   }
+  if (openComposer && latestDraft) {
+    const opened = uiStore.writerRef?.openAgentDraft?.(latestDraft) === true;
+    const context = findDraftContext(latestDraft.serverDraftId);
+    if (context) context.opened = opened;
+  }
+  return latestDraft;
 }
 
 async function syncAgentDraft(draft, serverDraftId = Number(draft?.serverDraftId)) {
   if (!draft || !Number.isInteger(serverDraftId) || serverDraftId <= 0 || syncingDraftIds.has(serverDraftId)) return;
 
+  rememberDraftContext(draft, serverDraftId);
+
   syncingDraftIds.add(serverDraftId);
   try {
     const existing = await db.value.draft.where('serverDraftId').equals(serverDraftId).first();
-    if (existing) return;
+    if (existing) {
+      const att = await db.value.att.get(existing.draftId);
+      return { ...existing, attachments: att?.attachments || [] };
+    }
 
     const account = accountStore.currentAccount?.email
       ? accountStore.currentAccount
@@ -131,6 +149,7 @@ async function syncAgentDraft(draft, serverDraftId = Number(draft?.serverDraftId
     const localDraftId = await db.value.draft.add(localDraft);
     await db.value.att.put({ draftId: localDraftId, attachments });
     draftStore.refreshList++;
+    return { ...localDraft, draftId: localDraftId, attachments };
   } finally {
     syncingDraftIds.delete(serverDraftId);
   }
@@ -165,7 +184,17 @@ const pendingConfirm = computed(() => {
       ['sendDraft', 'deleteEmail'].includes(toolName(p)) &&
       !(p.output || p.result)
     );
-  return part ? { ...part, toolName: toolName(part), args: part.args || part.input } : null;
+  if (!part) return null;
+  const name = toolName(part);
+  const args = part.args || part.input;
+  return {
+    ...part,
+    toolName: name,
+    args,
+    context: name === 'sendDraft'
+      ? findDraftContext(args?.draftId)
+      : findEmailContext(args?.emailId),
+  };
 });
 
 async function onSubmit() {
@@ -180,9 +209,27 @@ async function onConfirmTool({ accepted, toolCallId, toolName, args }) {
     chat.value.addToolResult({ toolCallId, output: { cancelled: true } });
     return;
   }
+  if (toolName === 'sendDraft') {
+    // The user may have edited the native composer after AI created the draft.
+    // Synchronize the newest content before executing the confirmed send.
+    const serverDraftId = Number(args.draftId);
+    let latestDraft = uiStore.writerRef?.getActiveAgentDraft?.(serverDraftId);
+    if (!latestDraft) {
+      latestDraft = await db.value.draft.where('serverDraftId').equals(serverDraftId).first();
+    }
+    if (latestDraft) {
+      const serverDraft = { ...latestDraft };
+      delete serverDraft.draftId;
+      delete serverDraft.attachments;
+      await http.put(`/agent/draft/${serverDraftId}`, serverDraft);
+    }
+  }
   const r = await http.post('/agent/confirm', { name: toolName, args });
   const output = r.data || r;
-  if (toolName === 'sendDraft' && output?.sent) await removeLocalAgentDraft(args.draftId);
+  if (toolName === 'sendDraft' && output?.sent) {
+    await removeLocalAgentDraft(args.draftId);
+    uiStore.writerRef?.dismissAgentDraft?.(args.draftId);
+  }
   chat.value.addToolResult({ toolCallId, output });
 }
 
@@ -191,10 +238,109 @@ async function clearChat() {
   chat.value = createChat();
 }
 
+function rememberDraftContext(draft, serverDraftId) {
+  draftContexts[Number(serverDraftId)] = {
+    subject: draft?.subject || '',
+    recipients: Array.isArray(draft?.receiveEmail) ? draft.receiveEmail.filter(Boolean) : [],
+    preview: draft?.text || stripHtml(draft?.content || ''),
+    sendType: draft?.sendType || '',
+    emailId: Number(draft?.emailId) || 0,
+  };
+}
+
+function findDraftContext(serverDraftId) {
+  const id = Number(serverDraftId);
+  if (draftContexts[id]) return draftContexts[id];
+  for (const message of chat.value.messages || []) {
+    for (const part of message.parts || []) {
+      const output = part.output || part.result;
+      const draft = output?.draft;
+      if (Number(draft?.serverDraftId || output?.draftId) !== id) continue;
+      rememberDraftContext(draft, id);
+      return draftContexts[id];
+    }
+  }
+  return null;
+}
+
+function findEmailContext(emailId) {
+  const id = Number(emailId);
+  const current = emailStore.contentData?.email;
+  if (Number(current?.emailId) === id) {
+    return { subject: current.subject || '', sender: current.sendEmail || '' };
+  }
+  for (const message of chat.value.messages || []) {
+    for (const part of message.parts || []) {
+      const output = part.output || part.result;
+      if (Number(output?.emailId) === id && (output?.subject || output?.from)) {
+        return { subject: output.subject || '', sender: output.from || '' };
+      }
+      const draft = output?.draft;
+      if (Number(draft?.emailId) === id) {
+        return { subject: draft.subject || '', sender: draft.receiveEmail?.[0] || '' };
+      }
+    }
+  }
+  return null;
+}
+
+function toolCard(title, rows = [], status = '') {
+  const details = rows
+    .filter(([, value]) => value)
+    .map(([label, value]) => `<div class="tool-meta"><span>${escape(label)}：</span>${escape(value)}</div>`)
+    .join('');
+  return `<div class="tool-friendly"><b>${escape(title)}</b>${details}${status ? `<div class="tool-status">${escape(status)}</div>` : ''}</div>`;
+}
+
+function renderKnownTool(part, name, args, output) {
+  if (name === 'draftReply' || name === 'draftNew') {
+    const draft = output?.draft;
+    const savedContext = findDraftContext(draft?.serverDraftId || output?.draftId);
+    const context = draft ? {
+      subject: draft.subject,
+      recipients: draft.receiveEmail || [],
+      preview: draft.text || stripHtml(draft.content || ''),
+    } : findEmailContext(args?.emailId);
+    return toolCard(
+      name === 'draftReply' ? `📝 ${t('aiAgentReplyDraft')}` : `📝 ${t('aiAgentNewDraft')}`,
+      [
+        [t('subject'), context?.subject],
+        [t('recipient'), context?.recipients?.join(', ') || context?.sender],
+        [t('aiAgentPreview'), context?.preview],
+      ],
+      output
+        ? (savedContext?.opened === false ? t('aiAgentSavedDraft') : t('aiAgentOpenedComposer'))
+        : t('aiAgentWorking'),
+    );
+  }
+  if (name === 'sendDraft') {
+    const context = findDraftContext(args?.draftId);
+    return toolCard(`📤 ${t('aiAgentSendDraft')}`, [
+      [t('subject'), context?.subject],
+      [t('recipient'), context?.recipients?.join(', ')],
+      [t('aiAgentPreview'), context?.preview],
+    ], output?.sent ? t('sendSuccessMsg') : t('aiAgentAwaitingConfirmation'));
+  }
+  if (['getEmail', 'summarizeEmail', 'getAttachmentText', 'deleteEmail'].includes(name)) {
+    const context = findEmailContext(args?.emailId);
+    if (context) {
+      const title = name === 'deleteEmail' ? `🗑 ${t('aiAgentDeleteEmail')}` : `📨 ${t('aiAgentReadEmail')}`;
+      return toolCard(title, [
+        [t('subject'), context.subject],
+        [t('sender'), context.sender],
+      ], name === 'deleteEmail' && !output ? t('aiAgentAwaitingConfirmation') : '');
+    }
+  }
+  return '';
+}
+
 function renderPart(part) {
   if (part.type === 'text') return md.render(part.text || '');
   if (part.type === 'tool-call' || (typeof part.type === 'string' && part.type.startsWith('tool-'))) {
     const args = part.args || part.input;
+    const output = part.output || part.result;
+    const friendly = renderKnownTool(part, toolName(part), args, output);
+    if (friendly) return friendly;
     return `<div class="tool-call"><b>🔧 ${part.toolName || part.type}</b><pre>${escape(JSON.stringify(args, null, 2))}</pre></div>`;
   }
   if (part.type === 'tool-result' || part.output) {
@@ -202,6 +348,7 @@ function renderPart(part) {
   }
   return '';
 }
+function stripHtml(value) { return String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
 function escape(s) { return String(s).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 </script>
 
@@ -258,6 +405,10 @@ function escape(s) { return String(s).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&
 .tool-call, .tool-result { font-size: 12px; background: #fff8e1; padding: 6px 8px; border-radius: 4px; margin: 4px 0; }
 .tool-result { background: #e8f5e9; }
 .tool-call pre, .tool-result pre { margin: 4px 0 0; max-height: 120px; overflow: auto; font-size: 11px; }
+.tool-friendly { font-size: 12px; background: #fff8e1; padding: 8px 10px; border-radius: 6px; margin: 4px 0; }
+.tool-meta { margin-top: 5px; line-height: 1.45; overflow-wrap: anywhere; }
+.tool-meta span { color: var(--el-text-color-secondary, #777); }
+.tool-status { margin-top: 7px; color: var(--el-color-primary, #409eff); font-weight: 600; }
 .agent-input { display: flex; gap: 8px; padding: 8px; border-top: 1px solid #eee; }
 .agent-input textarea { flex: 1; resize: none; padding: 6px 8px; border-radius: 4px; border: 1px solid #ddd; }
 .slide-enter-from, .slide-leave-to { transform: translateX(100%); }

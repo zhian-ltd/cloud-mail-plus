@@ -123,7 +123,10 @@ defineExpose({
   open,
   openReply,
   openForward,
-  openDraft
+  openDraft,
+  openAgentDraft,
+  getActiveAgentDraft,
+  dismissAgentDraft,
 })
 
 const {t} = useI18n()
@@ -376,17 +379,20 @@ async function sendEmail() {
     addRecipientRecord();
 
     if (form.draftId) {
-	  if (form.serverDraftId) {
-		try {
-		  await http.delete(`/agent/draft/${form.serverDraftId}`);
-		} catch (error) {
-		  console.warn('[draft] unable to remove synchronized server draft', error);
-		}
+	  const draftId = form.draftId;
+	  const serverDraftId = form.serverDraftId;
+	  try {
+		await Promise.all([
+		  db.value.draft.delete(draftId),
+		  db.value.att.delete(draftId),
+		]);
+		if (serverDraftId) await http.delete(`/agent/draft/${serverDraftId}`);
+		draftStore.refreshList++;
+	  } catch (error) {
+		// The message has already been sent. Cleanup failure must not turn the
+		// successful send into an error that encourages a duplicate retry.
+		console.warn('[draft] sent but unable to remove synchronized draft', error);
 	  }
-      form.subject = ''
-      form.content = ''
-      form.receiveEmail = []
-      draftStore.setDraft = {...toRaw(form)}
     }
 
     show.value = false
@@ -550,6 +556,34 @@ function openDraft(draft) {
   editor.value.focus()
 }
 
+// AI drafts open in the same native composer as a manual Reply action. Never
+// replace another in-progress composition: in that case the new draft remains
+// safely available in Drafts for the user to open later.
+function openAgentDraft(draft) {
+  if (show.value) {
+	return Number(form.serverDraftId) === Number(draft?.serverDraftId);
+  }
+  openDraft(draft);
+  return true;
+}
+
+function getActiveAgentDraft(serverDraftId) {
+  if (!show.value || Number(form.serverDraftId) !== Number(serverDraftId)) return null;
+  form.content = editor.value.getContent();
+  return {
+	...toRaw(form),
+	receiveEmail: [...form.receiveEmail],
+	attachments: [...form.attachments],
+  };
+}
+
+function dismissAgentDraft(serverDraftId) {
+  if (!show.value || Number(form.serverDraftId) !== Number(serverDraftId)) return false;
+  show.value = false;
+  resetForm();
+  return true;
+}
+
 const handleKeyDown = (event) => {
   if (event.key === 'Escape') {
     close()
@@ -564,7 +598,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
 });
 
-function close() {
+async function close() {
 
   if (selectStatus) openSelect();
 
@@ -573,7 +607,29 @@ function close() {
   }
 
   if (form.draftId) {
-    draftStore.setDraft = {...toRaw(form)}
+	form.content = editor.value.getContent();
+	const draft = {
+	  ...toRaw(form),
+	  receiveEmail: [...form.receiveEmail],
+	};
+	const draftId = draft.draftId;
+	const serverDraftId = draft.serverDraftId;
+	const attachments = [...(draft.attachments || [])];
+	delete draft.draftId;
+	delete draft.attachments;
+
+	await Promise.all([
+	  db.value.draft.update(draftId, draft),
+	  db.value.att.put({ draftId, attachments }),
+	]);
+	if (serverDraftId) {
+	  try {
+		await http.put(`/agent/draft/${serverDraftId}`, draft);
+	  } catch (error) {
+		console.warn('[draft] unable to synchronize server draft', error);
+	  }
+	}
+	draftStore.refreshList++;
     show.value = false
     resetForm()
     return;
