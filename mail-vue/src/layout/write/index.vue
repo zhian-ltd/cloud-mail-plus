@@ -1,5 +1,5 @@
 <template>
-  <div class="send" v-show="show">
+  <div class="send" :class="{ 'agent-open': agentOpen }" v-show="show">
     <div class="write-box">
       <div class="title">
         <div class="title-left">
@@ -114,6 +114,10 @@ import dayjs from "dayjs";
 import {useI18n} from "vue-i18n";
 import {ElMessageBox} from "element-plus";
 import http from "@/axios/index.js";
+
+defineProps({
+  agentOpen: Boolean,
+})
 
 defineExpose({
   open,
@@ -645,6 +649,14 @@ function close() {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: right 0.2s ease, width 0.2s ease;
+
+  @media (min-width: 1025px) {
+    &.agent-open {
+      right: 400px;
+      width: auto;
+    }
+  }
 
   .write-box {
     background: var(--el-bg-color);

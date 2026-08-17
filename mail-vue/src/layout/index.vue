@@ -1,5 +1,5 @@
 <template>
-  <el-container class="layout">
+  <el-container class="layout" :class="{ 'agent-open': agentStore.panelVisible }">
     <el-aside
         class="aside"
         :class="uiStore.asideShow ? 'aside-show' : 'el-aside-hide'">
@@ -18,7 +18,7 @@
       </el-main>
     </el-container>
   </el-container>
-  <writer ref="writerRef" />
+  <writer ref="writerRef" :agent-open="agentStore.panelVisible" />
   <AgentSidePanel :visible="agentStore.panelVisible" @close="agentStore.panelVisible = false" />
 </template>
 
@@ -91,6 +91,13 @@ onBeforeUnmount(() => {
   top: 0;
   left: 0;
   overflow: hidden;
+  transition: width 0.2s ease;
+
+  @media (min-width: 1025px) {
+    &.agent-open {
+      width: calc(100% - 400px);
+    }
+  }
 }
 
 .main-container {

@@ -231,7 +231,7 @@ function escape(s) { return String(s).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&
 <style scoped>
 .agent-panel {
   position: fixed; right: 0; top: 0; bottom: 0;
-  width: 400px; background: var(--el-bg-color, #fff);
+  width: min(400px, 100vw); background: var(--el-bg-color, #fff);
   border-left: 1px solid var(--el-border-color-light, #eee);
   display: flex; flex-direction: column;
   box-shadow: -4px 0 12px rgba(0,0,0,0.05); z-index: 1000;
