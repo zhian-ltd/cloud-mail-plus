@@ -532,6 +532,14 @@ function open() {
 
 function openDraft(draft) {
   Object.assign(form, {...draft})
+  if (!(Number(form.accountId) > 0)) {
+	const account = accountStore.currentAccount.email ? accountStore.currentAccount : userStore.user.account;
+	if (account) {
+	  form.accountId = account.accountId;
+	  form.sendEmail = account.email;
+	  form.name = account.name || userStore.user.name;
+	}
+  }
   defValue.value = ''
   setTimeout(() => defValue.value = form.content)
   show.value = true;

@@ -895,6 +895,15 @@ const emailService = {
 		)).get();
 	},
 
+	async listDrafts(c, userId) {
+		return orm(c).select().from(email).where(and(
+			eq(email.userId, userId),
+			eq(email.type, emailConst.type.SEND),
+			eq(email.status, emailConst.status.SAVING),
+			eq(email.isDel, isDel.NORMAL),
+		)).orderBy(desc(email.emailId)).limit(100).all();
+	},
+
 	async updateDraft(c, emailId, userId, fields) {
 		const current = await this.draftDetail(c, emailId, userId);
 		if (!current) return false;

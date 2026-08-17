@@ -55,36 +55,40 @@ async function syncAgentDrafts(messages) {
       const output = part.output || part.result;
       const draft = output?.draft;
       const serverDraftId = Number(draft?.serverDraftId || output?.draftId);
-      if (!draft || !Number.isInteger(serverDraftId) || serverDraftId <= 0 || syncingDraftIds.has(serverDraftId)) continue;
-
-      syncingDraftIds.add(serverDraftId);
-      try {
-        const existing = await db.value.draft.where('serverDraftId').equals(serverDraftId).first();
-        if (existing) continue;
-
-        const account = accountStore.currentAccount?.email
-          ? accountStore.currentAccount
-          : userStore.user?.account;
-        const localDraft = {
-          ...draft,
-          serverDraftId,
-          createTime: dayjs().utc().format('YYYY-MM-DD HH:mm:ss'),
-        };
-        if (!(Number(localDraft.accountId) > 0) && account) {
-          localDraft.accountId = account.accountId;
-          localDraft.sendEmail = account.email;
-          localDraft.name = account.name || userStore.user?.name || '';
-        }
-        const attachments = Array.isArray(localDraft.attachments) ? localDraft.attachments : [];
-        delete localDraft.attachments;
-        delete localDraft.draftId;
-        const localDraftId = await db.value.draft.add(localDraft);
-        await db.value.att.put({ draftId: localDraftId, attachments });
-        draftStore.refreshList++;
-      } finally {
-        syncingDraftIds.delete(serverDraftId);
-      }
+      await syncAgentDraft(draft, serverDraftId);
     }
+  }
+}
+
+async function syncAgentDraft(draft, serverDraftId = Number(draft?.serverDraftId)) {
+  if (!draft || !Number.isInteger(serverDraftId) || serverDraftId <= 0 || syncingDraftIds.has(serverDraftId)) return;
+
+  syncingDraftIds.add(serverDraftId);
+  try {
+    const existing = await db.value.draft.where('serverDraftId').equals(serverDraftId).first();
+    if (existing) return;
+
+    const account = accountStore.currentAccount?.email
+      ? accountStore.currentAccount
+      : userStore.user?.account;
+    const localDraft = {
+      ...draft,
+      serverDraftId,
+      createTime: dayjs().utc().format('YYYY-MM-DD HH:mm:ss'),
+    };
+    if (!(Number(localDraft.accountId) > 0) && account) {
+      localDraft.accountId = account.accountId;
+      localDraft.sendEmail = account.email;
+      localDraft.name = account.name || userStore.user?.name || '';
+    }
+    const attachments = Array.isArray(localDraft.attachments) ? localDraft.attachments : [];
+    delete localDraft.attachments;
+    delete localDraft.draftId;
+    const localDraftId = await db.value.draft.add(localDraft);
+    await db.value.att.put({ draftId: localDraftId, attachments });
+    draftStore.refreshList++;
+  } finally {
+    syncingDraftIds.delete(serverDraftId);
   }
 }
 
@@ -106,6 +110,8 @@ watch(() => chat.value.messages, async (messages) => {
 
 onMounted(async () => {
   if (!store.hydrated) await store.hydrate();
+  const serverDrafts = await http.get('/agent/drafts');
+  for (const draft of serverDrafts || []) await syncAgentDraft(draft);
 });
 
 const pendingConfirm = computed(() => {

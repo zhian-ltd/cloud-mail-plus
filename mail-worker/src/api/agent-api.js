@@ -101,6 +101,38 @@ app.delete('/agent/draft/:draftId', async (c) => {
   return c.json(result.ok({ deleted }));
 });
 
+app.get('/agent/drafts', async (c) => {
+  const userId = userContext.getUserId(c);
+  if (!userId) return c.json(result.fail('unauthorized'), 401);
+  const rows = await emailService.listDrafts(c, userId);
+  const drafts = rows.map(row => {
+    let recipients = [];
+    try { recipients = JSON.parse(row.recipient || '[]'); }
+    catch { recipients = []; }
+    let metadata = {};
+    try { metadata = JSON.parse(row.aiMetadata || '{}'); }
+    catch { metadata = {}; }
+    const receiveEmail = recipients.map(item => item?.address).filter(Boolean);
+    if (!receiveEmail.length && row.toEmail) receiveEmail.push(row.toEmail);
+    return {
+      serverDraftId: row.emailId,
+      sendEmail: row.sendEmail || '',
+      receiveEmail,
+      accountId: row.accountId,
+      name: row.name || '',
+      subject: row.subject || '',
+      content: row.content || '',
+      text: row.text || '',
+      sendType: row.inReplyTo ? 'reply' : '',
+      emailId: Number(metadata.sourceEmailId) || 0,
+      inReplyTo: row.inReplyTo || '',
+      relation: row.relation || '',
+      attachments: [],
+    };
+  });
+  return c.json(result.ok(drafts));
+});
+
 app.get('/agent/state', async (c) => {
   const userId = userContext.getUserId(c);
   if (!userId) return c.json(result.fail('unauthorized'), 401);
