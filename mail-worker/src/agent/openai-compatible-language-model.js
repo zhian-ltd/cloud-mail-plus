@@ -169,7 +169,10 @@ export class OpenAICompatibleLanguageModel {
 		this.supportedUrls = { 'image/*': [/^https:\/\//i, /^data:image\//i] };
 		this.baseURL = baseURL.replace(/\/+$/, '');
 		this.apiKey = apiKey;
-		this.fetch = fetchImpl;
+		// Cloudflare's global fetch validates its receiver. Calling a stored
+		// reference as `this.fetch()` changes that receiver to this model and
+		// results in an "Illegal invocation" error at runtime.
+		this.fetch = fetchImpl.bind(globalThis);
 	}
 
 	buildRequest(options, stream) {

@@ -11,6 +11,24 @@ function jsonResponse(body, init = {}) {
 }
 
 describe('OpenAI-compatible LanguageModelV3 adapter', () => {
+	it('calls fetch with the Cloudflare-compatible global receiver', async () => {
+		const receiverSensitiveFetch = vi.fn(function () {
+			if (this !== globalThis) throw new TypeError('Illegal invocation');
+			return jsonResponse({
+				choices: [{ message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+				usage: {},
+			});
+		});
+		const model = createOpenAICompatibleModel({
+			baseURL: 'https://api.example.com/v1', apiKey: 'key', modelId: 'compatible-model',
+			fetch: receiverSensitiveFetch,
+		});
+		await expect(model.doGenerate({ prompt: [] })).resolves.toMatchObject({
+			content: [{ type: 'text', text: 'OK' }],
+		});
+		expect(receiverSensitiveFetch).toHaveBeenCalledOnce();
+	});
+
 	it('works through AI SDK generateText and uses GPT-5 request conventions', async () => {
 		const fetchMock = vi.fn(async (_url, init) => {
 			const request = JSON.parse(init.body);

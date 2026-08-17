@@ -35,7 +35,7 @@ const dbInit = {
 		await this.v3_4DB(c);
 		await this.v3_5DB(c);
 		await settingService.refresh(c);
-		return c.text('success');
+		return c.text('success:v3.5');
 	},
 
 	async v3_5DB(c) {
@@ -51,6 +51,13 @@ const dbInit = {
 			if (!existing.has(name)) {
 				await c.env.db.prepare(`ALTER TABLE setting ADD COLUMN ${name} ${definition};`).run();
 			}
+		}
+
+		const { results: migratedResults = [] } = await c.env.db.prepare(`PRAGMA table_info('setting')`).all();
+		const migrated = new Set(migratedResults.map(column => column.name));
+		const missing = Object.keys(columns).filter(name => !migrated.has(name));
+		if (missing.length) {
+			throw new Error(`AI setting migration incomplete; missing columns: ${missing.join(', ')}`);
 		}
 	},
 

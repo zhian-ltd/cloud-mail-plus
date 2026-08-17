@@ -4,10 +4,15 @@ import { dbInit } from '../../src/init/init';
 describe('AI configuration migration', () => {
 	it('adds only missing setting columns and propagates database failures', async () => {
 		const executed = [];
+		const columns = new Set(['ai_provider']);
 		const db = {
 			prepare: vi.fn(sql => ({
-				all: async () => ({ results: [{ name: 'ai_provider' }] }),
-				run: async () => { executed.push(sql); },
+				all: async () => ({ results: [...columns].map(name => ({ name })) }),
+				run: async () => {
+					executed.push(sql);
+					const added = sql.match(/ADD COLUMN\s+(\w+)/i)?.[1];
+					if (added) columns.add(added);
+				},
 			})),
 		};
 		await dbInit.v3_5DB({ env: { db } });
@@ -22,5 +27,15 @@ describe('AI configuration migration', () => {
 			}),
 		};
 		await expect(dbInit.v3_5DB({ env: { db: failingDb } })).rejects.toThrow(/D1 failure/);
+	});
+
+	it('refuses to report success when D1 does not expose the migrated columns', async () => {
+		const db = {
+			prepare: () => ({
+				all: async () => ({ results: [] }),
+				run: async () => ({}),
+			}),
+		};
+		await expect(dbInit.v3_5DB({ env: { db } })).rejects.toThrow(/migration incomplete/i);
 	});
 });
